@@ -28,6 +28,7 @@ let activeTab = 'login'; // 'login' | 'register'
 let unsubscribeMessages = null;
 let unsubscribeFriends = null;
 let unsubscribeRequests = null;
+let friendListeners = {};
 let userColorsCache = {};
 
 // Предопределенные цвета аватаров
@@ -265,6 +266,7 @@ onAuthStateChanged(auth, async (firebaseUser) => {
 
                 closeChat();
                 startListeningRequestsAndFriends();
+                setOnlineStatus(true);
             } else {
                 // Новый юзер: прячем вход, включаем шаг 2
                 mainAuthCard.style.display = 'none'; 
@@ -438,7 +440,7 @@ async function renderFoundUser(user) {
     const div = document.createElement('div');
     div.className = 'found-user-item';
     div.innerHTML = `
-        <span>@${user.username}</span>
+        <span>${user.username}</span>
         <button class="friend-req-btn" id="btn-req-${user.uid}">Загрузка...</button>
     `;
     searchResults.appendChild(div);
@@ -499,6 +501,24 @@ async function renderFoundUser(user) {
     }
 }
 
+// === СИСТЕМА ПРИСУТСТВИЯ (ONLINE/OFFLINE) ===
+async function setOnlineStatus(isOnline) {
+    if (!currentUser) return;
+    try {
+        await updateDoc(doc(db, 'users', currentUser.uid), {
+            isOnline: isOnline,
+            lastActive: Date.now()
+        });
+    } catch (e) {
+        console.warn("Ошибка обновления статуса:", e);
+    }
+}
+
+// Отслеживаем активность вкладки
+window.addEventListener('focus', () => setOnlineStatus(true));
+window.addEventListener('blur', () => setOnlineStatus(false));
+window.addEventListener('beforeunload', () => setOnlineStatus(false));
+
 /* === РЕАЛ-ТАЙМ СЛУШАТЕЛИ ЗАЯВОК И ДРУЗЕЙ === */
 const friendRequestsTitle = document.getElementById('friendRequestsTitle');
 const friendRequestsList = document.getElementById('friendRequestsList');
@@ -525,7 +545,7 @@ function startListeningRequestsAndFriends() {
                 const div = document.createElement('div');
                 div.className = 'friend-req-item';
                 div.innerHTML = `
-                    <span>@${req.senderUsername}</span>
+                    <span>${req.senderUsername}</span>
                     <div class="req-actions">
                         <button class="req-btn accept" id="accept-${reqId}">Да</button>
                         <button class="req-btn reject" id="reject-${reqId}">Нет</button>
@@ -606,6 +626,10 @@ async function rejectFriendRequest(reqId) {
 }
 
 function renderFriendsList(friends) {
+
+    Object.values(friendListeners).forEach(unsub => unsub());
+    friendListeners = {}; // Очищаем объект
+
     chatList.innerHTML = '';
     if (friends.length === 0) {
         chatList.innerHTML = '<div style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">У вас пока нет друзей. Найдите их по логину выше!</div>';
@@ -617,17 +641,20 @@ function renderFriendsList(friends) {
         const avatarStr = friend.username.charAt(0).toUpperCase();
 
         const div = document.createElement('div');
+        // Добавляем ID для удобного поиска при обновлениях
+        div.id = `chat-item-${friend.uid}`;
         div.className = `chat-item ${currentChatFriend && currentChatFriend.uid === friend.uid ? 'active' : ''}`;
         div.onclick = () => selectFriendChat(friend);
+        
         div.innerHTML = `
             <div class="avatar-container">
                 <div class="avatar" style="background:${color}">${avatarStr}</div>
-                <div class="online-dot active"></div>
+                <div class="online-dot" id="dot-${friend.uid}"></div> <!-- Убрали active по умолчанию -->
             </div>
             <div class="chat-info">
                 <div class="chat-row-1">
                     <div class="chat-name">${friend.username}</div>
-                    <div class="chat-time"></div>
+                    <div id="badge-container-${friend.uid}"></div> <!-- Контейнер для счетчика -->
                 </div>
                 <div class="chat-row-2">
                     <div class="chat-last-msg" id="last-msg-${friend.uid}">Нажмите для общения</div>
@@ -636,14 +663,53 @@ function renderFriendsList(friends) {
         `;
         chatList.appendChild(div);
 
-        // Получаем последнее сообщение для этого друга
+        // Запускаем слушатели сообщений и статуса
         listenLastMessage(friend.uid);
     });
 }
 
 function listenLastMessage(friendUid) {
-    // В реальном чате можно сделать быстрый запрос на последнее сообщение
-    // Для экономии ресурсов и простоты мы оставим стандартную заглушку или обновим ее при получении сообщений
+    // 1. Слушаем счетчик непрочитанных сообщений, отправленных НАМ
+    const unreadQuery = query(
+        collection(db, 'messages'),
+        where('receiverUid', '==', currentUser.uid),
+        where('senderUid', '==', friendUid),
+        where('isRead', '==', false)
+    );
+    
+    const unsubUnread = onSnapshot(unreadQuery, (snapshot) => {
+        const badgeContainer = document.getElementById(`badge-container-${friendUid}`);
+        if (!badgeContainer) return;
+        
+        if (snapshot.size > 0) {
+            badgeContainer.innerHTML = `<span class="unread-badge">${snapshot.size}</span>`;
+            // Опционально: делаем шрифт последнего сообщения жирным
+            const lastMsgText = document.getElementById(`last-msg-${friendUid}`);
+            if (lastMsgText) lastMsgText.style.fontWeight = 'bold';
+        } else {
+            badgeContainer.innerHTML = '';
+            const lastMsgText = document.getElementById(`last-msg-${friendUid}`);
+            if (lastMsgText) lastMsgText.style.fontWeight = 'normal';
+        }
+    });
+
+    // 2. Слушаем честный онлайн статус друга
+    const unsubOnline = onSnapshot(doc(db, 'users', friendUid), (docSnap) => {
+        if(docSnap.exists()){
+            const isOnline = docSnap.data().isOnline;
+            const dot = document.getElementById(`dot-${friendUid}`);
+            if(dot) {
+                // Если онлайн - вешаем active (зеленый), если нет - убираем (будет серый)
+                dot.className = `online-dot ${isOnline ? 'active' : ''}`;
+            }
+        }
+    });
+
+    // 3. СОХРАНЯЕМ отписки в объект, чтобы потом их очистить в renderFriendsList
+    friendListeners[friendUid] = () => {
+        unsubUnread();
+        unsubOnline();
+    };
 }
 
 /* === ВЫБОР ДИАЛОГА И СИСТЕМА СООБЩЕНИЙ === */
@@ -678,14 +744,26 @@ function selectFriendChat(friend) {
     messagesArea.style.display = 'flex';
     chatInputArea.style.display = 'flex';
 
-    // Заполняем шапку чата
+    // Заполняем базовые данные шапки
     activeName.textContent = friend.username;
     activeAvatar.textContent = friend.username.charAt(0).toUpperCase();
     activeAvatar.style.background = getUserColor(friend.uid);
-    activeStatus.textContent = 'в сети';
+
+    // Подписываемся на статус друга в реальном времени для шапки
+    if (window.unsubscribeActiveStatus) window.unsubscribeActiveStatus();
+    window.unsubscribeActiveStatus = onSnapshot(doc(db, 'users', friend.uid), (docSnap) => {
+        if (docSnap.exists()) {
+            const isOnline = docSnap.data().isOnline;
+            activeStatus.textContent = isOnline ? 'в сети' : 'не в сети';
+            activeStatus.style.color = isOnline ? 'var(--primary)' : 'var(--text-muted)';
+            document.getElementById('activeOnline').className = `online-dot ${isOnline ? 'active' : ''}`;
+        }
+    });
 
     // Обновляем активный класс в списке друзей
     document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    const currentChatItem = document.getElementById(`chat-item-${friend.uid}`);
+    if (currentChatItem) currentChatItem.classList.add('active');
     
     // Подписываемся на сообщения
     listenToMessages();
@@ -892,7 +970,6 @@ infoToggleBtn.addEventListener('click', (e) => {
     
     // Обновляем панель информации
     if (currentChatFriend) {
-        // Было: document.getElementById('infoName').textContent = `@${currentChatFriend.username}`;
     document.getElementById('infoName').textContent = currentChatFriend.username;
         document.getElementById('infoAvatar').textContent = currentChatFriend.username.charAt(0).toUpperCase();
         document.getElementById('infoAvatar').style.background = getUserColor(currentChatFriend.uid);

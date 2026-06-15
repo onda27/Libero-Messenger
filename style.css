@@ -271,10 +271,14 @@ ul { list-style: none; }
 .avatar { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: var(--glass-border); display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 20px;}
 .online-dot {
     position: absolute; bottom: 2px; right: 2px; width: 12px; height: 12px;
-    background: var(--online); border-radius: 50%; border: 2px solid var(--bg-body);
-    transition: all 0.3s ease; transform: scale(0);
+    background: var(--text-muted); /* По умолчанию серый цвет (не в сети) */
+    border-radius: 50%; border: 2px solid var(--bg-body);
+    transition: all 0.3s ease; 
+    transform: scale(1); /* Всегда показываем кружок */
 }
-.online-dot.active { transform: scale(1); }
+.online-dot.active { 
+    background: var(--online); /* Зеленый цвет для онлайна */
+}
 
 .chat-info { flex: 1; min-width: 0; }
 .chat-row-1, .chat-row-2 { display: flex; justify-content: space-between; align-items: center; }
