@@ -34,6 +34,16 @@ let userColorsCache = {};
 // Предопределенные цвета аватаров
 const avatarsBg = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#0ea5e9", "#6366f1", "#a855f7", "#ec4899"];
 
+const LOGIN_REGEX = /^[a-z0-9]{3,20}$/;
+
+function normalizeLoginInput(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+}
+
+function isValidLogin(login) {
+    return LOGIN_REGEX.test(login);
+}
+
 function getUserColor(uid) {
     if (!userColorsCache[uid]) {
         let hash = 0;
@@ -104,12 +114,17 @@ function getAuthErrorMessage(error) {
         'auth/network-request-failed': 'Нет соединения с интернетом.',
         'auth/invalid-email': 'Некорректный логин.',
         'auth/operation-not-allowed': 'Авторизация временно недоступна.',
+        'permission-denied': 'Нет доступа к базе данных. Опубликуй правила из firestore.rules в Firebase Console.',
     };
 
     let code = error?.code;
     if (!code && error?.message) {
         const match = error.message.match(/\((auth\/[^)]+)\)/);
         if (match) code = match[1];
+    }
+
+    if (error?.message && error.message.includes('Missing or insufficient permissions')) {
+        return messages['permission-denied'];
     }
 
     if (code && messages[code]) {
@@ -188,6 +203,13 @@ tabRegisterBtn.addEventListener('click', () => {
 });
 
 // Сабмит формы авторизации
+authLoginInput.addEventListener('input', () => {
+    const cleaned = normalizeLoginInput(authLoginInput.value);
+    if (authLoginInput.value !== cleaned) {
+        authLoginInput.value = cleaned;
+    }
+});
+
 authSubmitBtn.addEventListener('click', handleAuthSubmit);
 authPasswordInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -210,6 +232,11 @@ async function handleAuthSubmit() {
         return;
     }
 
+    if (!isValidLogin(rawLogin)) {
+        showNotification('Логин: только английские буквы и цифры (a-z, 0-9), от 3 до 20 символов.', 'error');
+        return;
+    }
+
     if (password.length < 6) {
         showNotification('Пароль должен быть не менее 6 символов!', 'error');
         return;
@@ -226,29 +253,28 @@ async function handleAuthSubmit() {
             // Вход
             await signInWithEmailAndPassword(auth, fakeEmail, password);
         } else {
-            // Регистрация: Проверяем, свободен ли логин
-            const userRef = doc(db, 'users_by_username', rawLogin);
-            const userSnap = await getDoc(userRef);
-
-            if (userSnap.exists()) {
-                throw new Error('Этот логин уже занят другим пользователем!');
-            }
-
-            // Создаем аккаунт
             const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, password);
             const uid = userCredential.user.uid;
 
-            // Записываем данные пользователя в Firestore
-            await setDoc(doc(db, 'users', uid), {
-                uid: uid,
-                username: rawLogin,
-                createdAt: Date.now()
-            });
+            try {
+                const userRef = doc(db, 'users_by_username', rawLogin);
+                const userSnap = await getDoc(userRef);
 
-            // Резервируем имя пользователя
-            await setDoc(userRef, {
-                uid: uid
-            });
+                if (userSnap.exists()) {
+                    throw new Error('Этот логин уже занят другим пользователем!');
+                }
+
+                await setDoc(doc(db, 'users', uid), {
+                    uid: uid,
+                    username: rawLogin,
+                    createdAt: Date.now()
+                });
+
+                await setDoc(userRef, { uid: uid });
+            } catch (regError) {
+                await signOut(auth);
+                throw regError;
+            }
         }
     } catch (error) {
         console.error('Ошибка авторизации:', error);
@@ -309,12 +335,23 @@ function stopAllSubscriptions() {
     if (unsubscribeRequests) unsubscribeRequests();
 }
 
+function stopFriendsListeners() {
+    if (unsubscribeFriends) {
+        unsubscribeFriends();
+        unsubscribeFriends = null;
+    }
+}
+
 /* === ПОИСК ПОЛЬЗОВАТЕЛЕЙ И ОТПРАВКА ЗАЯВОК === */
 const userSearchInput = document.getElementById('userSearchInput');
 const searchResults = document.getElementById('searchResults');
 
 let searchTimeout = null;
 userSearchInput.addEventListener('input', () => {
+    const cleaned = normalizeLoginInput(userSearchInput.value);
+    if (userSearchInput.value !== cleaned) {
+        userSearchInput.value = cleaned;
+    }
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(searchUsers, 500);
 });
@@ -466,26 +503,62 @@ function startListeningRequestsAndFriends() {
         }
     });
 
-    // 2. Слушаем список друзей (все заявки, где status == 'accepted' и мы являемся либо отправителем, либо получателем)
-    const friendsQuery = query(
+    // 2. Слушаем список друзей (заявки accepted, где мы отправитель или получатель)
+    const friendsSentQuery = query(
         collection(db, 'friend_requests'),
+        where('senderUid', '==', currentUser.uid),
+        where('status', '==', 'accepted')
+    );
+    const friendsReceivedQuery = query(
+        collection(db, 'friend_requests'),
+        where('receiverUid', '==', currentUser.uid),
         where('status', '==', 'accepted')
     );
 
-    unsubscribeFriends = onSnapshot(friendsQuery, async (snapshot) => {
-        const friendsMap = new Map();
+    const friendsMap = new Map();
 
-        for (const docSnap of snapshot.docs) {
-            const data = docSnap.data();
-            if (data.senderUid === currentUser.uid) {
-                friendsMap.set(data.receiverUid, { uid: data.receiverUid, username: data.receiverUsername });
-            } else if (data.receiverUid === currentUser.uid) {
-                friendsMap.set(data.senderUid, { uid: data.senderUid, username: data.senderUsername });
-            }
-        }
-
+    function syncFriendsList() {
         renderFriendsList(Array.from(friendsMap.values()));
+    }
+
+    function applyFriendRequest(data) {
+        if (data.senderUid === currentUser.uid) {
+            friendsMap.set(data.receiverUid, { uid: data.receiverUid, username: data.receiverUsername });
+        } else if (data.receiverUid === currentUser.uid) {
+            friendsMap.set(data.senderUid, { uid: data.senderUid, username: data.senderUsername });
+        }
+    }
+
+    stopFriendsListeners();
+
+    const unsubFriendsSent = onSnapshot(friendsSentQuery, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            const data = change.doc.data();
+            if (change.type === 'removed') {
+                friendsMap.delete(data.receiverUid);
+            } else {
+                applyFriendRequest(data);
+            }
+        });
+        syncFriendsList();
     });
+
+    const unsubFriendsReceived = onSnapshot(friendsReceivedQuery, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            const data = change.doc.data();
+            if (change.type === 'removed') {
+                friendsMap.delete(data.senderUid);
+            } else {
+                applyFriendRequest(data);
+            }
+        });
+        syncFriendsList();
+    });
+
+    unsubscribeFriends = () => {
+        unsubFriendsSent();
+        unsubFriendsReceived();
+    };
 }
 
 async function acceptFriendRequest(reqId) {
@@ -633,48 +706,73 @@ async function sendMessage() {
 function listenToMessages() {
     if (unsubscribeMessages) unsubscribeMessages();
 
-    // Запрос на получение всех сообщений между двумя пользователями
-    const q = query(
-        collection(db, 'messages'),
-        orderBy('createdAt', 'asc')
-    );
+    const mergedMessages = new Map();
 
-    unsubscribeMessages = onSnapshot(q, (snapshot) => {
+    function renderMessages() {
         messagesArea.innerHTML = '';
         let lastDateString = '';
 
-        snapshot.forEach((docSnap) => {
-            const msg = docSnap.data();
-            
-            // Фильтруем сообщения только для текущей пары пользователей
-            const isMyMessage = msg.senderUid === currentUser.uid && msg.receiverUid === currentChatFriend.uid;
-            const isFriendMessage = msg.senderUid === currentChatFriend.uid && msg.receiverUid === currentUser.uid;
+        const sorted = Array.from(mergedMessages.values()).sort((a, b) => a.createdAt - b.createdAt);
 
-            if (isMyMessage || isFriendMessage) {
-                const date = new Date(msg.createdAt);
-                const dateString = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+        sorted.forEach((msg) => {
+            const isMyMessage = msg.senderUid === currentUser.uid;
+            const date = new Date(msg.createdAt);
+            const dateString = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
-                // Добавляем разделитель даты
-                if (dateString !== lastDateString) {
-                    const divider = document.createElement('div');
-                    divider.className = 'date-divider';
-                    divider.innerHTML = `<span>${dateString}</span>`;
-                    messagesArea.appendChild(divider);
-                    lastDateString = dateString;
-                }
-
-                // Рендерим сообщение
-                const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-                appendMessageNode(msg.text, isMyMessage, timeString);
+            if (dateString !== lastDateString) {
+                const divider = document.createElement('div');
+                divider.className = 'date-divider';
+                divider.innerHTML = `<span>${dateString}</span>`;
+                messagesArea.appendChild(divider);
+                lastDateString = dateString;
             }
+
+            const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+            appendMessageNode(msg.text, isMyMessage, timeString);
         });
 
-        // Добавляем индикатор печатания обратно
         const typingIndicator = document.getElementById('typingIndicator');
         messagesArea.appendChild(typingIndicator);
-        
         scrollToBottom();
+    }
+
+    function applySnapshot(snapshot) {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === 'removed') {
+                mergedMessages.delete(change.doc.id);
+            } else {
+                mergedMessages.set(change.doc.id, change.doc.data());
+            }
+        });
+        renderMessages();
+    }
+
+    const sentQuery = query(
+        collection(db, 'messages'),
+        where('senderUid', '==', currentUser.uid),
+        where('receiverUid', '==', currentChatFriend.uid),
+        orderBy('createdAt', 'asc')
+    );
+    const receivedQuery = query(
+        collection(db, 'messages'),
+        where('senderUid', '==', currentChatFriend.uid),
+        where('receiverUid', '==', currentUser.uid),
+        orderBy('createdAt', 'asc')
+    );
+
+    const unsubSent = onSnapshot(sentQuery, applySnapshot, (err) => {
+        console.error('Ошибка загрузки сообщений:', err);
+        showNotification('Не удалось загрузить сообщения.', 'error');
     });
+    const unsubReceived = onSnapshot(receivedQuery, applySnapshot, (err) => {
+        console.error('Ошибка загрузки сообщений:', err);
+        showNotification('Не удалось загрузить сообщения.', 'error');
+    });
+
+    unsubscribeMessages = () => {
+        unsubSent();
+        unsubReceived();
+    };
 }
 
 function appendMessageNode(text, isOut, time) {
