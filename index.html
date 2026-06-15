@@ -177,6 +177,21 @@
     </div>
 </div>
 
+<!-- Контейнер для красивых системных уведомлений -->
+<div id="notification-container"></div>
+
+<!-- Красивое модальное окно кастомного подтверждения (confirm) -->
+<div class="custom-confirm-overlay" id="customConfirmModal">
+    <div class="custom-confirm-card">
+        <h3 class="custom-confirm-title" id="customConfirmTitle">Подтверждение</h3>
+        <p class="custom-confirm-text" id="customConfirmText">Вы действительно хотите совершить это действие?</p>
+        <div class="custom-confirm-buttons">
+            <button class="custom-confirm-btn yes" id="customConfirmYesBtn">Да</button>
+            <button class="custom-confirm-btn no" id="customConfirmNoBtn">Отмена</button>
+        </div>
+    </div>
+</div>
+
 <script type="module" src="./scripts.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
@@ -194,9 +209,19 @@
               if (installingWorker.state === 'installed') {
                 if (navigator.serviceWorker.controller) {
                   console.log('Доступно новое обновление! Пожалуйста, обновите страницу.');
-                  // Мягко уведомляем пользователя о новой версии
-                  if (confirm('Доступно новое обновление мессенджера! Перезагрузить страницу для обновления?')) {
-                    window.location.reload();
+                  // Используем наше кастомное красивое подтверждение вместо браузерного confirm
+                  if (typeof window.showCustomConfirm === 'function') {
+                    window.showCustomConfirm(
+                      'Обновление', 
+                      'Доступна новая версия мессенджера! Перезагрузить страницу для обновления?', 
+                      () => {
+                        window.location.reload();
+                      }
+                    );
+                  } else {
+                    if (confirm('Доступно новое обновление мессенджера! Перезагрузить страницу для обновления?')) {
+                      window.location.reload();
+                    }
                   }
                 }
               }

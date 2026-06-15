@@ -46,6 +46,92 @@ function getUserColor(uid) {
     return userColorsCache[uid];
 }
 
+/* === УВЕДОМЛЕНИЯ И ПОДТВЕРЖДЕНИЯ === */
+const notificationContainer = document.getElementById('notification-container');
+const customConfirmModal = document.getElementById('customConfirmModal');
+const customConfirmTitle = document.getElementById('customConfirmTitle');
+const customConfirmText = document.getElementById('customConfirmText');
+const customConfirmYesBtn = document.getElementById('customConfirmYesBtn');
+const customConfirmNoBtn = document.getElementById('customConfirmNoBtn');
+
+let confirmCallback = null;
+
+function showNotification(message, type = 'error', duration = 4000) {
+    if (!notificationContainer) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast-notification ${type}`;
+    toast.textContent = message;
+
+    const dismiss = () => {
+        if (toast.classList.contains('hide')) return;
+        toast.classList.add('hide');
+        toast.addEventListener('animationend', () => toast.remove(), { once: true });
+    };
+
+    const timeout = setTimeout(dismiss, duration);
+    toast.addEventListener('click', () => {
+        clearTimeout(timeout);
+        dismiss();
+    });
+
+    notificationContainer.appendChild(toast);
+
+    const visibleToasts = notificationContainer.querySelectorAll('.toast-notification:not(.hide)');
+    if (visibleToasts.length > 3) {
+        visibleToasts[0].click();
+    }
+}
+
+function getAuthErrorMessage(error) {
+    const messages = {
+        'auth/invalid-credential': 'Неверный логин или пароль.',
+        'auth/wrong-password': 'Неверный пароль.',
+        'auth/user-not-found': 'Пользователь с таким логином не найден.',
+        'auth/email-already-in-use': 'Этот логин уже занят.',
+        'auth/weak-password': 'Пароль слишком простой (минимум 6 символов).',
+        'auth/too-many-requests': 'Слишком много попыток. Попробуйте позже.',
+        'auth/network-request-failed': 'Нет соединения с интернетом.',
+    };
+
+    if (error?.code && messages[error.code]) {
+        return messages[error.code];
+    }
+
+    if (error?.message && !error.message.startsWith('Firebase:')) {
+        return error.message;
+    }
+
+    return 'Произошла ошибка при авторизации.';
+}
+
+function showCustomConfirm(title, text, onConfirm) {
+    customConfirmTitle.textContent = title;
+    customConfirmText.textContent = text;
+    confirmCallback = onConfirm;
+    customConfirmModal.classList.add('active');
+}
+
+function hideCustomConfirm() {
+    customConfirmModal.classList.remove('active');
+    confirmCallback = null;
+}
+
+customConfirmYesBtn.addEventListener('click', () => {
+    const cb = confirmCallback;
+    hideCustomConfirm();
+    if (cb) cb();
+});
+
+customConfirmNoBtn.addEventListener('click', hideCustomConfirm);
+
+customConfirmModal.addEventListener('click', (e) => {
+    if (e.target === customConfirmModal) hideCustomConfirm();
+});
+
+window.showNotification = showNotification;
+window.showCustomConfirm = showCustomConfirm;
+
 /* === УПРАВЛЕНИЕ АВТОРИЗАЦИЕЙ === */
 const authContainer = document.getElementById('authContainer');
 const appContainer = document.getElementById('appContainer');
@@ -80,17 +166,17 @@ async function handleAuthSubmit() {
     const password = authPasswordInput.value.trim();
 
     if (!rawLogin || !password) {
-        alert('Пожалуйста, заполните все поля!');
+        showNotification('Пожалуйста, заполните все поля!', 'error');
         return;
     }
 
     if (rawLogin.length < 3) {
-        alert('Логин должен быть не менее 3-х символов!');
+        showNotification('Логин должен быть не менее 3-х символов!', 'error');
         return;
     }
 
     if (password.length < 6) {
-        alert('Пароль должен быть не менее 6 символов!');
+        showNotification('Пароль должен быть не менее 6 символов!', 'error');
         return;
     }
 
@@ -131,7 +217,7 @@ async function handleAuthSubmit() {
         }
     } catch (error) {
         console.error('Ошибка авторизации:', error);
-        alert(error.message || 'Произошла ошибка при авторизации.');
+        showNotification(getAuthErrorMessage(error), 'error');
     } finally {
         authSubmitBtn.disabled = false;
         authSubmitBtn.textContent = activeTab === 'login' ? 'Войти' : 'Зарегистрироваться';
@@ -179,9 +265,7 @@ onAuthStateChanged(auth, async (firebaseUser) => {
 
 // Кнопка выхода
 logoutBtn.addEventListener('click', () => {
-    if (confirm('Вы уверены, что хотите выйти?')) {
-        signOut(auth);
-    }
+    showCustomConfirm('Выход', 'Вы уверены, что хотите выйти?', () => signOut(auth));
 });
 
 function stopAllSubscriptions() {
@@ -238,6 +322,7 @@ async function searchUsers() {
         }
     } catch (e) {
         console.error("Ошибка поиска:", e);
+        showNotification('Ошибка при поиске пользователей.', 'error');
     }
 }
 
@@ -506,6 +591,7 @@ async function sendMessage() {
         sendBtn.style.display = 'none';
     } catch (e) {
         console.error("Ошибка отправки сообщения:", e);
+        showNotification('Не удалось отправить сообщение.', 'error');
     }
 }
 

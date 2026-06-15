@@ -1,10 +1,11 @@
 // sw.js
-const CACHE_NAME = 'libero-v3';
+const CACHE_NAME = 'libero-v4';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
-  './scripts.js'
+  './scripts.js',
+  './firebase.js'
 ];
 
 // Установка SW и кэширование ресурсов
