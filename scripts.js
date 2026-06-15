@@ -30,7 +30,6 @@ let unsubscribeMessages = null;
 let unsubscribeFriends = null;
 let unsubscribeRequests = null;
 let userColorsCache = {};
-let isRegistering = false; // <-- ДОБАВЬ ЭТУ СТРОКУ
 
 // Предопределенные цвета аватаров
 const avatarsBg = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#0ea5e9", "#6366f1", "#a855f7", "#ec4899"];
@@ -219,14 +218,6 @@ authPasswordInput.addEventListener('keydown', (e) => {
     }
 });
 
-authSubmitBtn.addEventListener('click', handleAuthSubmit);
-authPasswordInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        handleAuthSubmit();
-    }
-});
-
 async function handleAuthSubmit() {
     const email = authEmailInput.value.trim();
     const password = authPasswordInput.value.trim();
@@ -256,28 +247,6 @@ async function handleAuthSubmit() {
         showNotification(getAuthErrorMessage(error), 'error');
         authSubmitBtn.disabled = false;
         authSubmitBtn.textContent = activeTab === 'login' ? 'Войти' : 'Зарегистрироваться';
-    }
-}
-
-// Функция для загрузки профиля и инициализации интерфейса
-async function loadUserProfileAndStart(firebaseUser) {
-    const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
-    if (userSnap.exists()) {
-        currentUser = userSnap.data();
-        myProfileName.textContent = currentUser.username;
-        
-        // Показываем мессенджер
-        authContainer.classList.add('hidden');
-        appContainer.classList.add('active');
-
-        // Сбрасываем активный диалог до выбора пользователя
-        closeChat();
-
-        // Запускаем real-time подписки
-        startListeningRequestsAndFriends();
-    } else {
-        // Если профиля действительно нет, выходим
-        signOut(auth);
     }
 }
 
