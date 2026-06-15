@@ -4,9 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Libero Messenger</title>
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css?v=5">
+    <script>
+    (function () {
+        function ensureContainer() {
+            var el = document.getElementById('notification-container');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'notification-container';
+                (document.body || document.documentElement).appendChild(el);
+            }
+            return el;
+        }
+
+        function toast(message, type) {
+            var container = ensureContainer();
+            var node = document.createElement('div');
+            node.className = 'toast-notification ' + (type || 'error');
+            node.textContent = message;
+            container.appendChild(node);
+            setTimeout(function () {
+                node.classList.add('hide');
+                node.addEventListener('animationend', function () { node.remove(); }, { once: true });
+            }, 4000);
+            node.addEventListener('click', function () {
+                node.classList.add('hide');
+                node.addEventListener('animationend', function () { node.remove(); }, { once: true });
+            });
+        }
+
+        window.__liberoToast = toast;
+        window.alert = function (msg) { toast(String(msg), 'error'); };
+    })();
+    </script>
 </head>
 <body>
+
+<div id="notification-container"></div>
 
 <svg style="display: none;">
     <defs>
@@ -41,7 +75,7 @@
         <div class="auth-form" id="authForm">
             <input type="text" placeholder="Ваш логин (например, katya)" class="input-field" id="authLogin" autocomplete="username">
             <input type="password" placeholder="Пароль" class="input-field" id="authPassword" autocomplete="current-password">
-            <button class="auth-btn" id="authSubmitBtn">Войти</button>
+            <button type="button" class="auth-btn" id="authSubmitBtn">Войти</button>
         </div>
     </div>
 </div>
@@ -177,8 +211,7 @@
     </div>
 </div>
 
-<!-- Контейнер для красивых системных уведомлений -->
-<div id="notification-container"></div>
+<!-- Контейнер для красивых системных уведомлений (дублируется в head для надёжности) -->
 
 <!-- Красивое модальное окно кастомного подтверждения (confirm) -->
 <div class="custom-confirm-overlay" id="customConfirmModal">
@@ -192,38 +225,32 @@
     </div>
 </div>
 
-<script type="module" src="./scripts.js"></script>
+<script type="module" src="./scripts.js?v=5"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
+      navigator.serviceWorker.register('./sw.js?v=5')
         .then(reg => {
           console.log('Service Worker успешно зарегистрирован!', reg);
-          // Принудительно проверяем обновление при каждой загрузке страницы
           reg.update();
           
-          // Слушатель на случай, если найден новый Service Worker
           reg.onupdatefound = () => {
             const installingWorker = reg.installing;
             installingWorker.onstatechange = () => {
-              if (installingWorker.state === 'installed') {
-                if (navigator.serviceWorker.controller) {
-                  console.log('Доступно новое обновление! Пожалуйста, обновите страницу.');
-                  // Используем наше кастомное красивое подтверждение вместо браузерного confirm
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('Доступно новое обновление! Пожалуйста, обновите страницу.');
+                const showUpdateConfirm = () => {
                   if (typeof window.showCustomConfirm === 'function') {
                     window.showCustomConfirm(
-                      'Обновление', 
-                      'Доступна новая версия мессенджера! Перезагрузить страницу для обновления?', 
-                      () => {
-                        window.location.reload();
-                      }
+                      'Обновление',
+                      'Доступна новая версия мессенджера! Перезагрузить страницу для обновления?',
+                      () => window.location.reload()
                     );
                   } else {
-                    if (confirm('Доступно новое обновление мессенджера! Перезагрузить страницу для обновления?')) {
-                      window.location.reload();
-                    }
+                    setTimeout(showUpdateConfirm, 100);
                   }
-                }
+                };
+                showUpdateConfirm();
               }
             };
           };

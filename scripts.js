@@ -47,7 +47,16 @@ function getUserColor(uid) {
 }
 
 /* === УВЕДОМЛЕНИЯ И ПОДТВЕРЖДЕНИЯ === */
-const notificationContainer = document.getElementById('notification-container');
+function getNotificationContainer() {
+    let container = document.getElementById('notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notification-container';
+        document.body.appendChild(container);
+    }
+    return container;
+}
+
 const customConfirmModal = document.getElementById('customConfirmModal');
 const customConfirmTitle = document.getElementById('customConfirmTitle');
 const customConfirmText = document.getElementById('customConfirmText');
@@ -57,11 +66,12 @@ const customConfirmNoBtn = document.getElementById('customConfirmNoBtn');
 let confirmCallback = null;
 
 function showNotification(message, type = 'error', duration = 4000) {
-    if (!notificationContainer) return;
+    const container = getNotificationContainer();
+    const text = String(message);
 
     const toast = document.createElement('div');
     toast.className = `toast-notification ${type}`;
-    toast.textContent = message;
+    toast.textContent = text;
 
     const dismiss = () => {
         if (toast.classList.contains('hide')) return;
@@ -75,9 +85,9 @@ function showNotification(message, type = 'error', duration = 4000) {
         dismiss();
     });
 
-    notificationContainer.appendChild(toast);
+    container.appendChild(toast);
 
-    const visibleToasts = notificationContainer.querySelectorAll('.toast-notification:not(.hide)');
+    const visibleToasts = container.querySelectorAll('.toast-notification:not(.hide)');
     if (visibleToasts.length > 3) {
         visibleToasts[0].click();
     }
@@ -92,10 +102,18 @@ function getAuthErrorMessage(error) {
         'auth/weak-password': 'Пароль слишком простой (минимум 6 символов).',
         'auth/too-many-requests': 'Слишком много попыток. Попробуйте позже.',
         'auth/network-request-failed': 'Нет соединения с интернетом.',
+        'auth/invalid-email': 'Некорректный логин.',
+        'auth/operation-not-allowed': 'Авторизация временно недоступна.',
     };
 
-    if (error?.code && messages[error.code]) {
-        return messages[error.code];
+    let code = error?.code;
+    if (!code && error?.message) {
+        const match = error.message.match(/\((auth\/[^)]+)\)/);
+        if (match) code = match[1];
+    }
+
+    if (code && messages[code]) {
+        return messages[code];
     }
 
     if (error?.message && !error.message.startsWith('Firebase:')) {
@@ -106,6 +124,10 @@ function getAuthErrorMessage(error) {
 }
 
 function showCustomConfirm(title, text, onConfirm) {
+    if (!customConfirmModal) {
+        if (onConfirm) onConfirm();
+        return;
+    }
     customConfirmTitle.textContent = title;
     customConfirmText.textContent = text;
     confirmCallback = onConfirm;
@@ -113,24 +135,31 @@ function showCustomConfirm(title, text, onConfirm) {
 }
 
 function hideCustomConfirm() {
-    customConfirmModal.classList.remove('active');
+    if (customConfirmModal) customConfirmModal.classList.remove('active');
     confirmCallback = null;
 }
 
-customConfirmYesBtn.addEventListener('click', () => {
-    const cb = confirmCallback;
-    hideCustomConfirm();
-    if (cb) cb();
-});
+if (customConfirmYesBtn) {
+    customConfirmYesBtn.addEventListener('click', () => {
+        const cb = confirmCallback;
+        hideCustomConfirm();
+        if (cb) cb();
+    });
+}
 
-customConfirmNoBtn.addEventListener('click', hideCustomConfirm);
+if (customConfirmNoBtn) {
+    customConfirmNoBtn.addEventListener('click', hideCustomConfirm);
+}
 
-customConfirmModal.addEventListener('click', (e) => {
-    if (e.target === customConfirmModal) hideCustomConfirm();
-});
+if (customConfirmModal) {
+    customConfirmModal.addEventListener('click', (e) => {
+        if (e.target === customConfirmModal) hideCustomConfirm();
+    });
+}
 
 window.showNotification = showNotification;
 window.showCustomConfirm = showCustomConfirm;
+window.alert = (msg) => showNotification(getAuthErrorMessage({ message: String(msg) }), 'error');
 
 /* === УПРАВЛЕНИЕ АВТОРИЗАЦИЕЙ === */
 const authContainer = document.getElementById('authContainer');
@@ -160,6 +189,12 @@ tabRegisterBtn.addEventListener('click', () => {
 
 // Сабмит формы авторизации
 authSubmitBtn.addEventListener('click', handleAuthSubmit);
+authPasswordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        handleAuthSubmit();
+    }
+});
 
 async function handleAuthSubmit() {
     const rawLogin = authLoginInput.value.trim().toLowerCase();
