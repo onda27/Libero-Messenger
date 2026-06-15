@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Libero Messenger</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<svg style="display: none;">
+    <defs>
+        <symbol id="icon-search" viewBox="0 0 24 24"><path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+        <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+        <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2m4-2v4m-4 8h8m-6 4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+        <symbol id="icon-back" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+        <symbol id="icon-call" viewBox="0 0 24 24"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+        <symbol id="icon-video" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+        <symbol id="icon-more" viewBox="0 0 24 24"><path d="M12 12h.01M19 12h.01M5 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></symbol>
+        <symbol id="icon-attach" viewBox="0 0 24 24"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+        <symbol id="icon-smile" viewBox="0 0 24 24"><path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+        <symbol id="icon-mic" viewBox="0 0 24 24"><path d="M19 10v2a7 7 0 01-14 0v-2m7 9v-4m0-11a3 3 0 00-3 3v4a3 3 0 106 0V6a3 3 0 00-3-3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+        <symbol id="icon-send" viewBox="0 0 24 24"><path d="M3 12h11M3 12l18-9-4 18-5-6-9-3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+        <symbol id="icon-check-double" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7M10 17l5-5M15 12l5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+        <symbol id="icon-x" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+    </defs>
+</svg>
+
+<div class="app-container">
+    
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <button class="menu-toggle" onclick="toggleTheme()"><svg style="width:24px;height:24px;fill:var(--text-main)"><use href="#icon-menu"></use></svg></button>
+            <h1 style="font-size: 20px; font-weight: 700; letter-spacing: 1px;">Libero</h1>
+            <button onclick="toggleTheme()" title="Сменить тему">🌓</button>
+        </div>
+        <div class="search-bar">
+            <svg style="width:18px;height:18px;fill:var(--text-muted)"><use href="#icon-search"></use></svg>
+            <input type="text" placeholder="Поиск чатов..." id="searchInput">
+        </div>
+        <div class="chat-list" id="chatList">
+            </div>
+    </div>
+
+    <div class="main-chat" id="mainChat">
+        <div class="chat-header" id="chatHeader" onclick="toggleInfoPanel()">
+            <div class="header-user">
+                <button class="back-btn" onclick="toggleSidebar(event)"><svg style="width:24px;height:24px"><use href="#icon-back"></use></svg></button>
+                <div class="avatar-container" style="width:40px;height:40px;">
+                    <div class="avatar" id="activeAvatar" style="font-size: 16px;"></div>
+                    <div class="online-dot active" id="activeOnline"></div>
+                </div>
+                <div class="header-info">
+                    <h2 id="activeName">Выберите чат</h2>
+                    <div class="header-status" id="activeStatus">был(а) недавно</div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button onclick="startCall('voice', event)" title="Аудиозвонок"><svg><use href="#icon-call"></use></svg></button>
+                <button onclick="startCall('video', event)" title="Видеозвонок"><svg><use href="#icon-video"></use></svg></button>
+                <button onclick="toggleInfoPanel(event)" title="Информация"><svg><use href="#icon-more"></use></svg></button>
+            </div>
+        </div>
+
+        <div class="messages-area" id="messagesArea">
+            <div class="typing-indicator" id="typingIndicator">
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <button class="action-btn"><svg><use href="#icon-attach"></use></svg></button>
+            <div class="input-wrapper">
+                <button class="action-btn" style="margin-right:10px; width:24px;height:24px;"><svg><use href="#icon-smile"></use></svg></button>
+                <textarea id="messageInput" placeholder="Написать сообщение..." rows="1" oninput="autoExpand(this)" onkeypress="handleEnter(event)"></textarea>
+            </div>
+            <button class="action-btn" id="micBtn"><svg><use href="#icon-mic"></use></svg></button>
+            <button class="action-btn send-btn" id="sendBtn" style="display:none;" onclick="sendMessage()"><svg style="fill:none;"><use href="#icon-send"></use></svg></button>
+        </div>
+    </div>
+
+    <div class="info-panel" id="infoPanel">
+        <div class="info-header">
+            <div class="avatar" id="infoAvatar"></div>
+            <h2 id="infoName" style="margin-bottom: 5px;">Имя</h2>
+            <div style="color: var(--text-muted); font-size: 14px;" id="infoStatus">Онлайн</div>
+        </div>
+        <div class="info-section">
+            <h3>Описание</h3>
+            <p style="font-size: 14px; line-height: 1.5;">В сети. Занят разработкой. Писать только по делу.</p>
+        </div>
+        <div class="info-section">
+            <h3>Вложения (42)</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 10px;">
+                <div style="aspect-ratio: 1; background: var(--glass-border); border-radius: 8px;"></div>
+                <div style="aspect-ratio: 1; background: var(--glass-border); border-radius: 8px;"></div>
+                <div style="aspect-ratio: 1; background: var(--glass-border); border-radius: 8px;"></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<div class="modal-overlay" id="callModal">
+    <div class="call-screen">
+        <div style="color: var(--text-muted); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 2px; font-size: 12px;" id="callTypeText">Входящий звонок</div>
+        <div class="call-avatar-wrapper">
+            <div class="call-pulse"></div>
+            <div class="avatar" id="callAvatar"></div>
+        </div>
+        <h2 style="margin-bottom: 10px; font-size: 24px;" id="callName">Пользователь</h2>
+        <div style="color: var(--text-muted);" id="callStatus">Соединение...</div>
+        
+        <div class="call-actions" id="incomingControls">
+            <button class="call-btn btn-reject" onclick="endCall()"><svg style="width:28px;height:28px;fill:none;"><use href="#icon-x"></use></svg></button>
+            <button class="call-btn btn-accept" onclick="acceptCall()"><svg style="width:28px;height:28px;fill:none;"><use href="#icon-call"></use></svg></button>
+        </div>
+    </div>
+</div>
+
+<div class="video-call-fs" id="videoCallFS">
+    <div class="vc-main">
+        <div class="vc-overlay"></div>
+        <div class="vc-pip">Я</div>
+        <div class="vc-controls">
+            <button class="call-btn btn-control"><svg style="width:24px;height:24px;fill:none;"><use href="#icon-mic"></use></svg></button>
+            <button class="call-btn btn-control"><svg style="width:24px;height:24px;fill:none;"><use href="#icon-video"></use></svg></button>
+            <button class="call-btn btn-reject" onclick="endCall()"><svg style="width:24px;height:24px;fill:none;"><use href="#icon-x"></use></svg></button>
+        </div>
+    </div>
+</div>
+
+<script src="./scripts.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('Service Worker успешно зарегистрирован!', reg))
+        .catch(err => console.error('Ошибка регистрации SW:', err));
+    });
+  }
+</script>
+</body>
+</html>
