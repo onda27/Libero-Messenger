@@ -61,8 +61,8 @@
     </defs>
 </svg>
 
-<!-- Окно авторизации -->
 <div class="auth-container" id="authContainer">
+    
     <div class="auth-card" id="mainAuthCard">
         <h2 style="margin-bottom: 5px; font-weight: 800; letter-spacing: 2px; color: var(--primary);">LIBERO</h2>
         <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 25px;">Мессенджер для друзей и близких</p>
@@ -73,15 +73,13 @@
         </div>
         
         <div class="auth-form" id="authForm">
-            <input type="email" placeholder="Email" class="input-field" id="authEmail" autocomplete="email">
-            <input type="password" placeholder="Пароль" class="input-field" id="authPassword" autocomplete="current-password">
+            <input type="email" placeholder="Email" class="input-field" id="authEmail" autocomplete="email" required>
+            <input type="password" placeholder="Пароль" class="input-field" id="authPassword" autocomplete="current-password" required>
             <button type="button" class="auth-btn" id="authSubmitBtn">Войти</button>
         </div>
     </div>
-</div>
 
-<div class="modal-overlay" id="usernameModal">
-    <div class="auth-card">
+    <div class="auth-card" id="usernameCard" style="display: none;">
         <h2 style="margin-bottom: 5px; font-weight: 800; color: var(--primary);">ШАГ 2</h2>
         <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 25px;">Придумайте уникальный логин для поиска</p>
         
@@ -90,42 +88,33 @@
             <button type="button" class="auth-btn" id="setupUsernameBtn">Сохранить и войти</button>
         </div>
     </div>
+
 </div>
 
-<!-- Основной интерфейс приложения -->
 <div class="app-container" id="appContainer">
     
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <button class="menu-toggle" id="themeToggleBtn"><svg style="width:24px;height:24px;fill:var(--text-main)"><use href="#icon-menu"></use></svg></button>
+            <button class="menu-toggle" id="menuToggleBtn"><svg style="width:24px;height:24px;fill:var(--text-main)"><use href="#icon-menu"></use></svg></button>
             <h1 style="font-size: 20px; font-weight: 700; letter-spacing: 1px;" id="myProfileName">Libero</h1>
             <div style="display: flex; gap: 10px;">
-                <button id="themeToggleBtn2" title="Сменить тему" style="font-size: 16px;">🌓</button>
+                <button id="themeToggleBtn" title="Сменить тему" style="font-size: 16px;">🌓</button>
                 <button id="logoutBtn" title="Выйти" style="font-size: 16px;"><svg style="width:20px;height:20px;stroke:var(--text-main)"><use href="#icon-logout"></use></svg></button>
             </div>
         </div>
 
-        <!-- Поиск пользователей -->
         <div class="sidebar-section-title">Найти друга</div>
         <div class="search-bar" style="margin-bottom: 10px;">
             <svg style="width:18px;height:18px;fill:var(--text-muted)"><use href="#icon-search"></use></svg>
             <input type="text" placeholder="Поиск по логину..." id="userSearchInput">
         </div>
-        <div class="search-results" id="searchResults">
-            <!-- Результаты поиска пользователей -->
-        </div>
+        <div class="search-results" id="searchResults"></div>
 
-        <!-- Входящие заявки в друзья -->
         <div class="sidebar-section-title" id="friendRequestsTitle" style="display:none;">Заявки в друзья</div>
-        <div class="friend-requests-list" id="friendRequestsList">
-            <!-- Список заявок -->
-        </div>
+        <div class="friend-requests-list" id="friendRequestsList"></div>
 
-        <!-- Список диалогов (только друзья) -->
         <div class="sidebar-section-title">Диалоги</div>
-        <div class="chat-list" id="chatList">
-            <!-- Только принятые друзья будут здесь -->
-        </div>
+        <div class="chat-list" id="chatList"></div>
     </div>
 
     <div class="main-chat" id="mainChat">
@@ -148,7 +137,6 @@
             </div>
         </div>
 
-        <!-- Экран заглушки "выберите чат" -->
         <div id="noChatSelectedScreen" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-muted); gap:15px; background:rgba(0,0,0,0.05);">
             <div style="font-size: 48px;">💬</div>
             <h2>Выберите собеседника из списка друзей</h2>
@@ -168,7 +156,7 @@
                 <textarea id="messageInput" placeholder="Написать сообщение..." rows="1"></textarea>
             </div>
             <button class="action-btn" id="micBtn"><svg><use href="#icon-mic"></use></svg></button>
-            <button class="action-btn send-btn" id="sendBtn" style="display:none;"><svg style="fill:none;"><use href="#icon-send"></use></svg></button>
+            <button class="action-btn send-btn" id="sendBtn" style="display:none;"><svg><use href="#icon-send"></use></svg></button>
         </div>
     </div>
 
@@ -205,8 +193,8 @@
         <div style="color: var(--text-muted);" id="callStatus">Соединение...</div>
         
         <div class="call-actions" id="incomingControls">
-            <button class="call-btn btn-reject" id="callRejectBtn"><svg style="width:28px;height:28px;fill:none;"><use href="#icon-x"></use></svg></button>
-            <button class="call-btn btn-accept" id="callAcceptBtn"><svg style="width:28px;height:28px;fill:none;"><use href="#icon-call"></use></svg></button>
+            <button class="call-btn btn-reject" id="callRejectBtn"><svg style="width:28px;height:28px;"><use href="#icon-x"></use></svg></button>
+            <button class="call-btn btn-accept" id="callAcceptBtn"><svg style="width:28px;height:28px;"><use href="#icon-call"></use></svg></button>
         </div>
     </div>
 </div>
@@ -216,16 +204,13 @@
         <div class="vc-overlay"></div>
         <div class="vc-pip">Я</div>
         <div class="vc-controls">
-            <button class="call-btn btn-control"><svg style="width:24px;height:24px;fill:none;"><use href="#icon-mic"></use></svg></button>
-            <button class="call-btn btn-control"><svg style="width:24px;height:24px;fill:none;"><use href="#icon-video"></use></svg></button>
-            <button class="call-btn btn-reject" id="videoCallEndBtn"><svg style="width:24px;height:24px;fill:none;"><use href="#icon-x"></use></svg></button>
+            <button class="call-btn btn-control"><svg style="width:24px;height:24px;"><use href="#icon-mic"></use></svg></button>
+            <button class="call-btn btn-control"><svg style="width:24px;height:24px;"><use href="#icon-video"></use></svg></button>
+            <button class="call-btn btn-reject" id="videoCallEndBtn"><svg style="width:24px;height:24px;"><use href="#icon-x"></use></svg></button>
         </div>
     </div>
 </div>
 
-<!-- Контейнер для красивых системных уведомлений (дублируется в head для надёжности) -->
-
-<!-- Красивое модальное окно кастомного подтверждения (confirm) -->
 <div class="custom-confirm-overlay" id="customConfirmModal">
     <div class="custom-confirm-card">
         <h3 class="custom-confirm-title" id="customConfirmTitle">Подтверждение</h3>

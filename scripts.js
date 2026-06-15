@@ -187,7 +187,7 @@ const authSubmitBtn = document.getElementById('authSubmitBtn');
 const authEmailInput = document.getElementById('authEmail'); // Теперь тут Email
 const authPasswordInput = document.getElementById('authPassword');
 
-const usernameModal = document.getElementById('usernameModal');
+const usernameCard = document.getElementById('usernameCard'); // Вместо usernameModal
 const setupUsernameInput = document.getElementById('setupUsernameInput');
 const setupUsernameBtn = document.getElementById('setupUsernameBtn');
 
@@ -250,41 +250,37 @@ async function handleAuthSubmit() {
     }
 }
 
-// Слушатель состояния авторизации
 onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
         try {
             const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
             
             if (userSnap.exists()) {
-                // Пользователь существует и у него есть никнейм
                 currentUser = userSnap.data();
                 myProfileName.textContent = currentUser.username;
                 
                 authContainer.classList.add('hidden');
                 appContainer.classList.add('active');
-                usernameModal.classList.remove('active');
+                usernameCard.style.display = 'none'; // Скрываем карточку шага 2
 
                 closeChat();
                 startListeningRequestsAndFriends();
             } else {
-                // Пользователь только что зарегистрировался, у него нет никнейма в базе
-                mainAuthCard.style.display = 'none'; // Прячем форму входа
-                usernameModal.classList.add('active'); // Показываем модалку выбора логина
+                // Новый юзер: прячем вход, включаем шаг 2
+                mainAuthCard.style.display = 'none'; 
+                usernameCard.style.display = 'block'; 
             }
         } catch (err) {
             console.error("Ошибка проверки профиля:", err);
             showNotification('Ошибка связи с базой данных.', 'error');
         }
     } else {
-        // Выход из аккаунта или не авторизован
         currentUser = null;
         stopAllSubscriptions();
         
         authContainer.classList.remove('hidden');
         mainAuthCard.style.display = 'block'; // Возвращаем форму входа
-        appContainer.classList.remove('active');
-        usernameModal.classList.remove('active');
+        usernameCard.style.display = 'none';  // Скрываем шаг 2
         
         authEmailInput.value = '';
         authPasswordInput.value = '';
@@ -341,7 +337,7 @@ setupUsernameBtn.addEventListener('click', async () => {
         currentUser = { uid: firebaseUser.uid, username: rawLogin };
         myProfileName.textContent = currentUser.username;
         
-        usernameModal.classList.remove('active');
+        usernameCard.style.display = 'none'; // Скрываем карточку шага 2
         authContainer.classList.add('hidden');
         appContainer.classList.add('active');
         
