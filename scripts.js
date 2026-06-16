@@ -839,39 +839,91 @@ async function sendMessage() {
 function listenToMessages() {
     if (unsubscribeMessages) unsubscribeMessages();
 
-    const mergedMessages = new Map();
+    // Очищаем контейнер один раз ПРИ СМЕНЕ чата
+    messagesArea.innerHTML = ''; 
+    ensureTypingIndicator();
 
-    function renderMessages() {
-        messagesArea.innerHTML = ''; // Сбрасываем поле
-        let lastDateString = '';
+    // Вспомогательная функция для генерации ID даты, чтобы не дублировать разделители
+    const getDateId = (timestamp) => {
+        return 'date-' + new Date(timestamp).toLocaleDateString('ru-RU').replace(/\./g, '-');
+    };
+
+    function applySnapshot(snapshot) {
         const unreadIds = [];
 
-        const sorted = Array.from(mergedMessages.values()).sort((a, b) => a.createdAt - b.createdAt);
+        snapshot.docChanges().forEach((change) => {
+            const msg = change.doc.data();
+            msg.id = change.doc.id;
 
-        sorted.forEach((msg) => {
-            const isMyMessage = msg.senderUid === currentUser.uid;
-            const date = new Date(msg.createdAt);
-            const dateString = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+            // 1. ЕСЛИ СООБЩЕНИЕ ДОБАВЛЕНО
+            if (change.type === 'added') {
+                const date = new Date(msg.createdAt);
+                const dateString = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+                const dateId = getDateId(msg.createdAt);
 
-            // Отрисовываем разделитель строго ПЕРЕД сообщениями текущего дня
-            if (dateString !== lastDateString) {
-                appendDividerNode(dateString);
-                lastDateString = dateString;
+                // Проверяем, есть ли уже разделитель для этого дня
+                if (!document.getElementById(dateId)) {
+                    const divDivider = document.createElement('div');
+                    divDivider.className = 'date-divider';
+                    divDivider.id = dateId;
+                    divDivider.innerHTML = `<span>${dateString}</span>`;
+                    // Вставляем перед индикатором ввода
+                    messagesArea.insertBefore(divDivider, document.getElementById('typingIndicator'));
+                }
+
+                const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                const isMyMessage = msg.senderUid === currentUser.uid;
+                
+                // Создаем узел сообщения
+                const divMsg = document.createElement('div');
+                divMsg.id = `msg-${msg.id}`; // Присваиваем уникальный ID узлу!
+                divMsg.className = `message ${isMyMessage ? 'msg-out' : 'msg-in'}`;
+                
+                const tickIcon = msg.isRead ? '#icon-check-double' : '#icon-check';
+                const tickClass = msg.isRead ? 'msg-status read' : 'msg-status';
+                
+                divMsg.innerHTML = `
+                    <div class="msg-bubble">
+                        ${msg.text}
+                        <div class="msg-meta">
+                            <span>${timeString}</span>
+                            ${isMyMessage ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
+                        </div>
+                    </div>
+                `;
+                
+                // Вставляем строго перед индикатором ввода
+                messagesArea.insertBefore(divMsg, document.getElementById('typingIndicator'));
+
+                // Собираем входящие непрочитанные
+                if (!isMyMessage && !msg.isRead) {
+                    unreadIds.push(msg.id);
+                }
             }
 
-            const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-            appendMessageNode(msg.text, isMyMessage, timeString, msg.isRead);
+            // 2. ЕСЛИ СООБЩЕНИЕ ИЗМЕНИЛОСЬ (например, изменился статус прочтения isRead)
+            if (change.type === 'modified') {
+                const msgNode = document.getElementById(`msg-${msg.id}`);
+                if (msgNode && msg.senderUid === currentUser.uid) {
+                    // Обновляем только иконку галочки внутри мета-данных, не трогая всё сообщение!
+                    const statusSpan = msgNode.querySelector('.msg-status');
+                    if (statusSpan) {
+                        statusSpan.className = msg.isRead ? 'msg-status read' : 'msg-status';
+                        statusSpan.querySelector('use').setAttribute('href', msg.isRead ? '#icon-check-double' : '#icon-check');
+                    }
+                }
+            }
 
-            // Если сообщение для нас и не прочитано — собираем ID для обновления
-            if (!isMyMessage && !msg.isRead && msg.id) {
-                unreadIds.push(msg.id);
+            // 3. ЕСЛИ СООБЩЕНИЕ УДАЛЕНО
+            if (change.type === 'removed') {
+                const msgNode = document.getElementById(`msg-${msg.id}`);
+                if (msgNode) msgNode.remove();
             }
         });
 
-        ensureTypingIndicator(); // Ставим индикатор всегда в самый низ
         scrollToBottom();
 
-        // Асинхронно помечаем прочитанными в БД
+        // Помечаем прочитанными в БД
         unreadIds.forEach(id => {
             updateDoc(doc(db, 'messages', id), { isRead: true }).catch(console.error);
         });
@@ -884,21 +936,8 @@ function listenToMessages() {
             typingIndicator.className = 'typing-indicator';
             typingIndicator.id = 'typingIndicator';
             typingIndicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+            messagesArea.appendChild(typingIndicator);
         }
-        messagesArea.appendChild(typingIndicator);
-    }
-
-    function applySnapshot(snapshot) {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === 'removed') {
-                mergedMessages.delete(change.doc.id);
-            } else {
-                const data = change.doc.data();
-                data.id = change.doc.id; // Обязательно сохраняем ID документа
-                mergedMessages.set(change.doc.id, data);
-            }
-        });
-        renderMessages();
     }
 
     const sentQuery = query(
