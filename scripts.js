@@ -1074,13 +1074,30 @@ function sendPushNotification(title, body) {
     }
 }
 
-// Глобальный слушатель новых сообщений (Добавьте его вызов внутрь onAuthStateChanged, когда пользователь авторизован)
+// Глобальный слушатель новых сообщений
 function startGlobalNotificationListener() {
-    // Запрашиваем права на уведомления
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-        Notification.requestPermission();
+    // 1. Проверяем и запрашиваем права через твое кастомное окно
+    if ("Notification" in window && Notification.permission === "default") {
+        // Задержка в 1 секунду, чтобы интерфейс чатов успел прогрузиться после авторизации
+        setTimeout(() => {
+            window.showCustomConfirm(
+                'Уведомления',
+                'Включите уведомления, чтобы не пропускать новые сообщения, когда приложение свернуто.',
+                () => {
+                    // Системный запрос вызывается ТОЛЬКО после клика пользователя
+                    Notification.requestPermission().then(permission => {
+                        if (permission === 'granted') {
+                            showNotification('Уведомления успешно включены!', 'success');
+                        } else {
+                            showNotification('Уведомления отклонены', 'error');
+                        }
+                    });
+                }
+            );
+        }, 1000);
     }
 
+    // 2. Слушаем новые сообщения
     const unreadQuery = query(
         collection(db, 'messages'),
         where('receiverUid', '==', currentUser.uid),
@@ -1098,8 +1115,6 @@ function startGlobalNotificationListener() {
 
                 if (isTabHidden || isDifferentChat) {
                     const textStr = msg.type === 'image' ? '📸 Отправил(а) фото' : msg.text;
-                    // Имя отправителя можно вытащить, сделав доп. запрос, 
-                    // или просто написать "Новое сообщение"
                     sendPushNotification('Новое сообщение в Libero', textStr);
                 }
             }
