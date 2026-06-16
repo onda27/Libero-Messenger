@@ -731,7 +731,7 @@ function renderFriendsList(friends) {
         // Запускаем слушатели сообщений и статуса
         listenLastMessage(friend.uid);
     });
-    
+
     if (window.pendingChatUid) {
     const targetFriend = friends.find(f => f.uid === window.pendingChatUid);
     if (targetFriend) {
@@ -801,10 +801,13 @@ const micBtn = document.getElementById('micBtn');
 
 function closeChat() {
     currentChatFriend = null;
-    noChatSelectedScreen.style.display = 'flex';
-    chatHeader.style.display = 'none';
-    messagesArea.style.display = 'none';
-    chatInputArea.style.display = 'none';
+    if (noChatSelectedScreen) noChatSelectedScreen.style.display = 'flex';
+    if (chatHeader) chatHeader.style.display = 'none';
+    if (messagesArea) messagesArea.style.display = 'none';
+    
+    // Вот тут скрипт падал, теперь он просто пропустит строчку, если элемента нет:
+    if (chatInputArea) chatInputArea.style.display = 'none'; 
+    
     if (unsubscribeMessages) unsubscribeMessages();
 }
 
