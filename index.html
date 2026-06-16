@@ -125,7 +125,7 @@
         <div class="chat-list" id="chatList"></div>
     </div>
 
-    <div class="main-chat" id="mainChat">
+<div class="main-chat" id="mainChat">
         <div class="chat-header" id="chatHeader" style="display:none;">
             <div class="header-user">
                 <button class="back-btn" id="backBtnMobile"><svg style="width:24px;height:24px"><use href="#icon-back"></use></svg></button>
@@ -145,9 +145,10 @@
             </div>
         </div>
 
-        <div id="noChatSelectedScreen" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-muted); gap:15px; background:rgba(0,0,0,0.05);">
+        <!-- ДОБАВЛЕН КЛАСС welcome-screen ДЛЯ УПРАВЛЕНИЯ НА МОБИЛКАХ -->
+        <div id="noChatSelectedScreen" class="welcome-screen" style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-muted); gap:15px; background:rgba(0,0,0,0.05);">
             <div style="font-size: 48px;">💬</div>
-            <h2>Выберите чат</h2>
+            <h2>Выберите чат для начала общения</h2>
             <p style="font-size: 14px;">Для общения вы должны состоять в друзьях</p>
         </div>
 
@@ -158,11 +159,11 @@
         </div>
 
         <div class="chat-input-area" id="chatInputArea" style="display:none;">
-            <button class="action-btn"><svg><use href="#icon-attach"></use></svg></button>
-        <div class="input-wrapper">
-            <textarea id="messageInput" placeholder="Написать сообщение..." rows="1"></textarea>
-        </div>
-            <button class="action-btn" id="micBtn"><svg><use href="#icon-mic"></use></svg></button>
+            <button class="action-btn attach-btn"><svg><use href="#icon-attach"></use></svg></button>
+            <div class="input-wrapper">
+                <textarea id="messageInput" placeholder="Написать сообщение..." rows="1"></textarea>
+            </div>
+            <button class="action-btn mic-btn" id="micBtn"><svg><use href="#icon-mic"></use></svg></button>
             <button class="action-btn send-btn" id="sendBtn" style="display:none;"><svg><use href="#icon-send"></use></svg></button>
         </div>
     </div>
