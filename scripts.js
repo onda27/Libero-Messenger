@@ -882,10 +882,23 @@ async function sendMessage() {
     sendBtn.style.display = 'none';
 
     try {
+        // 1. Получаем ключ чата
+        const key = await CryptoManager.getChatKey(currentUser.uid, currentChatFriend.uid);
+        
+        // 2. Шифруем текст
+        const { encrypted, iv } = await CryptoManager.encryptMessage(text, key);
+        
+        // 3. Конвертируем зашифрованный ArrayBuffer в Base64 (т.к. Firestore требует строку)
+        const encryptedArray = new Uint8Array(encrypted);
+        const encryptedBase64 = btoa(String.fromCharCode(...encryptedArray));
+
+        // 4. Отправляем в Firestore согласно правилам безопасности
         await addDoc(collection(db, 'messages'), {
             senderUid: currentUser.uid,
             receiverUid: currentChatFriend.uid,
-            text: text,
+            type: 'text',
+            encryptedText: encryptedBase64,
+            iv: Array.from(iv), // Сохраняем IV как массив
             createdAt: Date.now(),
             isRead: false 
         });
@@ -1033,10 +1046,12 @@ function appendMessageNode(msgObj, isOut, time) {
         }).catch(err => console.error("Ошибка расшифровки:", err));
 
     } else {
-        // Обычный текст
+        // Генерируем уникальный ID для элемента, чтобы вставить текст после расшифровки
+        const textId = `text-${msgObj.createdAt}-${Math.random().toString(36).substr(2, 9)}`;
+        
         div.innerHTML = `
             <div class="msg-bubble">
-                ${msgObj.text}
+                <span id="${textId}">Расшифровка...</span>
                 <div class="msg-meta">
                     <span>${time}</span>
                     ${isOut ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
@@ -1044,6 +1059,36 @@ function appendMessageNode(msgObj, isOut, time) {
             </div>
         `;
         messagesArea.appendChild(div);
+
+        // Если это новое зашифрованное текстовое сообщение
+        if (msgObj.type === 'text' && msgObj.encryptedText && msgObj.iv) {
+            CryptoManager.getChatKey(msgObj.senderUid, msgObj.receiverUid).then(key => {
+                // Декодируем Base64 обратно в бинарный массив
+                const binaryString = atob(msgObj.encryptedText);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // Дешифруем
+                CryptoManager.decryptMessage(bytes.buffer, new Uint8Array(msgObj.iv), key).then(decryptedText => {
+                    const el = document.getElementById(textId);
+                    if (el) {
+                        el.textContent = decryptedText;
+                        scrollToBottom();
+                    }
+                }).catch(err => {
+                    console.error("Ошибка расшифровки:", err);
+                    const el = document.getElementById(textId);
+                    if (el) el.textContent = "Ошибка расшифровки";
+                });
+            }).catch(err => console.error("Ошибка получения ключа:", err));
+            
+        } else if (msgObj.text) {
+            // Фолбэк для старых незашифрованных сообщений в базе (чтобы чат не сломался)
+            const el = document.getElementById(textId);
+            if (el) el.textContent = msgObj.text;
+        }
     }
 }
 
