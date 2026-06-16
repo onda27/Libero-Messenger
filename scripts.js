@@ -1067,8 +1067,7 @@ function sendPushNotification(title, body) {
             reg.showNotification(title, {
                 body: body,
                 icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
-                vibrate: [200, 100, 200],
-                tag: 'libero-msg' // Заменяет старое уведомление новым, чтобы не спамить
+                vibrate: [200, 100, 200]
             });
         });
     }
