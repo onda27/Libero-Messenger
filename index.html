@@ -3,11 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Libero</title>
+    <title>Libero Messenger</title>
     <link rel="stylesheet" href="./style.css">
-    <link rel="manifest" href="./manifest.json">
-    <meta name="theme-color" content="#6366f1">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
     <script>
     (function () {
         function ensureContainer() {
@@ -157,15 +154,14 @@
             </div>
         </div>
 
- <div id="chatInputArea" style="display: none;"> 
-    <button class="action-btn" id="attachBtn"><svg><use href="#icon-attach"></use></svg></button>
-    <input type="file" id="mediaInput" accept="image/*" style="display: none;">
-    <div class="input-wrapper">
-        <textarea id="messageInput" placeholder="Написать сообщение..." rows="1"></textarea>
-    </div>
-    <button class="action-btn" id="micBtn"><svg><use href="#icon-mic"></use></svg></button>
-    <button class="action-btn send-btn" id="sendBtn" style="display:none;"><svg><use href="#icon-send"></use></svg></button>
-</div>
+        <div class="chat-input-area" id="chatInputArea" style="display:none;">
+            <button class="action-btn"><svg><use href="#icon-attach"></use></svg></button>
+        <div class="input-wrapper">
+            <textarea id="messageInput" placeholder="Написать сообщение..." rows="1"></textarea>
+        </div>
+            <button class="action-btn" id="micBtn"><svg><use href="#icon-mic"></use></svg></button>
+            <button class="action-btn send-btn" id="sendBtn" style="display:none;"><svg><use href="#icon-send"></use></svg></button>
+        </div>
     </div>
 
     <div class="info-panel" id="infoPanel">

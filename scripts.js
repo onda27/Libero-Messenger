@@ -21,9 +21,6 @@ import {
     limit
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-import { uploadMedia, downloadMedia } from './storage.js';
-import { CryptoManager } from './crypto.js';
-
 /* === ЛОКАЛЬНОЕ СОСТОЯНИЕ === */
 let currentUser = null; // { uid, username }
 let currentChatFriend = null; // { uid, username, color }
@@ -75,9 +72,6 @@ const customConfirmTitle = document.getElementById('customConfirmTitle');
 const customConfirmText = document.getElementById('customConfirmText');
 const customConfirmYesBtn = document.getElementById('customConfirmYesBtn');
 const customConfirmNoBtn = document.getElementById('customConfirmNoBtn');
-
-const attachBtn = document.getElementById('attachBtn');
-const mediaInput = document.getElementById('mediaInput');
 
 let confirmCallback = null;
 
@@ -210,48 +204,6 @@ const setupUsernameBtn = document.getElementById('setupUsernameBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const myProfileName = document.getElementById('myProfileName');
 
-attachBtn.addEventListener('click', () => mediaInput.click());
-
-mediaInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file || !currentChatFriend) return;
-
-    mediaInput.value = ''; // сброс инпута
-    showNotification('Шифрование и отправка...', 'info', 2000);
-
-    try {
-        // 1. Получаем ключ чата
-        const key = await CryptoManager.getChatKey(currentUser.uid, currentChatFriend.uid);
-        
-        // 2. Читаем файл в буфер
-        const arrayBuffer = await file.arrayBuffer();
-        
-        // 3. Шифруем
-        const { encryptedBuffer, iv } = await CryptoManager.encryptFile(arrayBuffer, key);
-        
-        // 4. Загружаем в Supabase
-        const ext = file.name.split('.').pop();
-        const filePath = `${currentUser.uid}/${Date.now()}.${ext}`;
-        await uploadMedia(encryptedBuffer, filePath);
-
-        // 5. Сохраняем в Firestore
-        await addDoc(collection(db, 'messages'), {
-            senderUid: currentUser.uid,
-            receiverUid: currentChatFriend.uid,
-            text: '', // пусто для картинок
-            type: 'image',
-            mediaPath: filePath,
-            iv: iv, // Вектор инициализации (нужен для расшифровки)
-            createdAt: Date.now(),
-            isRead: false 
-        });
-
-    } catch (err) {
-        console.error(err);
-        showNotification('Ошибка отправки медиа', 'error');
-    }
-});
-
 // Переключение табов
 tabLoginBtn.addEventListener('click', () => {
     activeTab = 'login';
@@ -323,7 +275,6 @@ onAuthStateChanged(auth, async (firebaseUser) => {
 
                 closeChat();
                 startListeningRequestsAndFriends();
-                startGlobalNotificationListener()
                 setOnlineStatus(true);
             } else {
                 // Новый юзер: прячем вход, включаем шаг 2
@@ -731,14 +682,6 @@ function renderFriendsList(friends) {
         // Запускаем слушатели сообщений и статуса
         listenLastMessage(friend.uid);
     });
-
-    if (window.pendingChatUid) {
-    const targetFriend = friends.find(f => f.uid === window.pendingChatUid);
-    if (targetFriend) {
-        selectFriendChat(targetFriend);
-        window.pendingChatUid = null;
-    }
-}
 }
 
 function listenLastMessage(friendUid) {
@@ -801,13 +744,10 @@ const micBtn = document.getElementById('micBtn');
 
 function closeChat() {
     currentChatFriend = null;
-    if (noChatSelectedScreen) noChatSelectedScreen.style.display = 'flex';
-    if (chatHeader) chatHeader.style.display = 'none';
-    if (messagesArea) messagesArea.style.display = 'none';
-    
-    // Вот тут скрипт падал, теперь он просто пропустит строчку, если элемента нет:
-    if (chatInputArea) chatInputArea.style.display = 'none'; 
-    
+    noChatSelectedScreen.style.display = 'flex';
+    chatHeader.style.display = 'none';
+    messagesArea.style.display = 'none';
+    chatInputArea.style.display = 'none';
     if (unsubscribeMessages) unsubscribeMessages();
 }
 
@@ -882,23 +822,10 @@ async function sendMessage() {
     sendBtn.style.display = 'none';
 
     try {
-        // 1. Получаем ключ чата
-        const key = await CryptoManager.getChatKey(currentUser.uid, currentChatFriend.uid);
-        
-        // 2. Шифруем текст
-        const { encrypted, iv } = await CryptoManager.encryptMessage(text, key);
-        
-        // 3. Конвертируем зашифрованный ArrayBuffer в Base64 (т.к. Firestore требует строку)
-        const encryptedArray = new Uint8Array(encrypted);
-        const encryptedBase64 = btoa(String.fromCharCode(...encryptedArray));
-
-        // 4. Отправляем в Firestore согласно правилам безопасности
         await addDoc(collection(db, 'messages'), {
             senderUid: currentUser.uid,
             receiverUid: currentChatFriend.uid,
-            type: 'text',
-            encryptedText: encryptedBase64,
-            iv: Array.from(iv), // Сохраняем IV как массив
+            text: text,
             createdAt: Date.now(),
             isRead: false 
         });
@@ -1008,88 +935,24 @@ function appendDividerNode(dateString) {
     messagesArea.appendChild(div); // Добавляем в конец
 }
 
-function appendMessageNode(msgObj, isOut, time) {
+function appendMessageNode(text, isOut, time, isRead) {
     const div = document.createElement('div');
     div.className = `message ${isOut ? 'msg-out' : 'msg-in'}`;
     
-    const tickIcon = msgObj.isRead ? '#icon-check-double' : '#icon-check';
-    const tickClass = msgObj.isRead ? 'msg-status read' : 'msg-status';
+    // ДОБАВЛЕНО: Присваиваем класс 'read', если сообщение прочитано
+    const tickIcon = isRead ? '#icon-check-double' : '#icon-check';
+    const tickClass = isRead ? 'msg-status read' : 'msg-status';
     
-    // Если это картинка
-    if (msgObj.type === 'image') {
-        const imgId = `img-${msgObj.createdAt}`;
-        div.innerHTML = `
-            <div class="msg-bubble" style="padding: 5px;">
-                <img id="${imgId}" src="https://via.placeholder.com/200?text=Загрузка..." class="msg-attachment" style="width: 200px; height: 200px; object-fit: cover; opacity: 0.5;">
-                <div class="msg-meta" style="position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.5); padding: 2px 5px; border-radius: 10px; color: white;">
-                    <span>${time}</span>
-                    ${isOut ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
-                </div>
+    div.innerHTML = `
+        <div class="msg-bubble">
+            ${text}
+            <div class="msg-meta">
+                <span>${time}</span>
+                ${isOut ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
             </div>
-        `;
-        messagesArea.appendChild(div);
-
-        // Асинхронно скачиваем и расшифровываем
-        CryptoManager.getChatKey(msgObj.senderUid, msgObj.receiverUid).then(key => {
-            downloadMedia(msgObj.mediaPath).then(encryptedBuffer => {
-                CryptoManager.decryptFile(encryptedBuffer, msgObj.iv, key).then(decryptedBuffer => {
-                    const blob = new Blob([decryptedBuffer], { type: 'image/jpeg' });
-                    const url = URL.createObjectURL(blob);
-                    const imgEl = document.getElementById(imgId);
-                    if (imgEl) {
-                        imgEl.src = url;
-                        imgEl.style.opacity = '1';
-                        imgEl.onload = () => scrollToBottom(); // прокручиваем, когда загрузится
-                    }
-                });
-            });
-        }).catch(err => console.error("Ошибка расшифровки:", err));
-
-    } else {
-        // Генерируем уникальный ID для элемента, чтобы вставить текст после расшифровки
-        const textId = `text-${msgObj.createdAt}-${Math.random().toString(36).substr(2, 9)}`;
-        
-        div.innerHTML = `
-            <div class="msg-bubble">
-                <span id="${textId}">Расшифровка...</span>
-                <div class="msg-meta">
-                    <span>${time}</span>
-                    ${isOut ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
-                </div>
-            </div>
-        `;
-        messagesArea.appendChild(div);
-
-        // Если это новое зашифрованное текстовое сообщение
-        if (msgObj.type === 'text' && msgObj.encryptedText && msgObj.iv) {
-            CryptoManager.getChatKey(msgObj.senderUid, msgObj.receiverUid).then(key => {
-                // Декодируем Base64 обратно в бинарный массив
-                const binaryString = atob(msgObj.encryptedText);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                
-                // Дешифруем
-                CryptoManager.decryptMessage(bytes.buffer, new Uint8Array(msgObj.iv), key).then(decryptedText => {
-                    const el = document.getElementById(textId);
-                    if (el) {
-                        el.textContent = decryptedText;
-                        scrollToBottom();
-                    }
-                }).catch(err => {
-                    console.error("Ошибка расшифровки:", err);
-                    const el = document.getElementById(textId);
-                    if (el) el.textContent = "Ошибка расшифровки";
-                });
-            }).catch(err => console.error("Ошибка получения ключа:", err));
-            
-        } else if (msgObj.text) {
-            // Фолбэк для старых незашифрованных сообщений в базе (чтобы чат не сломался)
-            const el = document.getElementById(textId);
-            if (el) el.textContent = msgObj.text;
-        }
-    }
+        </div>
+    `;
+    messagesArea.appendChild(div); 
 }
 
 function scrollToBottom() {
@@ -1116,55 +979,6 @@ function setTheme(themeName) {
     if(themeIcon) {
         themeIcon.innerHTML = `<use href="${themeName === 'dark' ? '#icon-sun' : '#icon-moon'}"></use>`;
     }
-}
-
-// Функция отправки системного Push-уведомления
-function sendPushNotification(title, body, senderUid) {
-    if ("Notification" in window && Notification.permission === "granted") {
-        navigator.serviceWorker.ready.then(reg => {
-            reg.showNotification(title, {
-                body: body,
-                icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
-                vibrate: [200, 100, 200],
-                tag: 'libero-msg',
-                data: { senderUid: senderUid } // <-- Сохраняем UID для клика
-            });
-        });
-    }
-}
-
-// Глобальный слушатель новых сообщений (Добавьте его вызов внутрь onAuthStateChanged, когда пользователь авторизован)
-function startGlobalNotificationListener() {
-    // Запрашиваем права на уведомления
-    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
-        Notification.requestPermission();
-    }
-
-    const unreadQuery = query(
-        collection(db, 'messages'),
-        where('receiverUid', '==', currentUser.uid),
-        where('isRead', '==', false)
-    );
-
-    onSnapshot(unreadQuery, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === 'added') {
-                const msg = change.doc.data();
-                
-                // Проверяем: если вкладка свернута ИЛИ открыт другой чат -> шлем уведомление
-                const isTabHidden = document.visibilityState === 'hidden';
-                const isDifferentChat = !currentChatFriend || currentChatFriend.uid !== msg.senderUid;
-
-                if (isTabHidden || isDifferentChat) {
-                    const textStr = msg.type === 'image' ? '📸 Отправил(а) фото' : msg.text;
-                    sendPushNotification('Новое сообщение в Libero', textStr, msg.senderUid);
-                    // Имя отправителя можно вытащить, сделав доп. запрос, 
-                    // или просто написать "Новое сообщение"
-                    sendPushNotification('Новое сообщение в Libero', textStr);
-                }
-            }
-        });
-    });
 }
 
 backBtnMobile.addEventListener('click', () => {
@@ -1244,18 +1058,3 @@ function endCall() {
     callModal.classList.remove('active');
     videoCallFS.classList.remove('active');
 }
-
-navigator.serviceWorker.addEventListener('message', (event) => {
-    if (event.data && event.data.type === 'OPEN_CHAT') {
-        const senderUid = event.data.senderUid;
-        
-        // Имитируем клик по чату друга
-        const friendElement = document.getElementById(`chat-item-${senderUid}`);
-        if (friendElement) {
-            friendElement.click();
-        } else {
-            // Если список друзей еще не успел отрендериться, сохраняем в глобальную переменную
-            window.pendingChatUid = senderUid;
-        }
-    }
-});

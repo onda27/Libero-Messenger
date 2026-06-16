@@ -57,30 +57,17 @@ service cloud.firestore {
         resource.data.senderUid == request.auth.uid ||
         resource.data.receiverUid == request.auth.uid
       );
-      
       allow create: if isSignedIn()
         && request.resource.data.senderUid == request.auth.uid
         && request.resource.data.receiverUid is string
         && request.resource.data.receiverUid != request.auth.uid
-        && request.resource.data.iv is list
-        && request.resource.data.createdAt is number
-        && (
-           // Если это обычный зашифрованный текст
-           (request.resource.data.get('type', 'text') == 'text' 
-            && request.resource.data.encryptedText is string)
-           ||
-           // Если это картинка (медиафайл)
-           (request.resource.data.type == 'image' 
-            && request.resource.data.mediaPath is string)
-        );
-        
-      allow update: if isSignedIn() 
-        && resource.data.receiverUid == request.auth.uid;
-        
-      allow delete: if isSignedIn() && (
-        resource.data.receiverUid == request.auth.uid ||
-        resource.data.senderUid == request.auth.uid
-      );
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 4000
+        && request.resource.data.createdAt is number;
+      // ЗАМЕНИТЬ ЭТУ СТРОКУ:
+      allow update: if isSignedIn() && resource.data.receiverUid == request.auth.uid;
+      allow delete: if false;
     }
   }
 }
