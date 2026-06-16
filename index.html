@@ -44,6 +44,8 @@
 
 <svg style="display: none;">
     <defs>
+        <symbol id="icon-sun" viewBox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+        <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
         <symbol id="icon-search" viewBox="0 0 24 24"><path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
         <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
         <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2m4-2v4m-4 8h8m-6 4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
@@ -99,7 +101,9 @@
             <button class="menu-toggle" id="menuToggleBtn"><svg style="width:24px;height:24px;fill:var(--text-main)"><use href="#icon-menu"></use></svg></button>
             <h1 style="font-size: 20px; font-weight: 700; letter-spacing: 1px;" id="myProfileName">Libero</h1>
             <div style="display: flex; gap: 10px;">
-                <button id="themeToggleBtn" title="Сменить тему" style="font-size: 16px;">🌓</button>
+               <button id="themeToggleBtn" title="Сменить тему" style="display:flex; justify-content:center; align-items:center; width:24px; height:24px;">
+                    <svg style="width:20px;height:20px;stroke:var(--text-main); fill:none;" id="themeIcon"><use href="#icon-sun"></use></svg>
+                </button>
                 <button id="logoutBtn" title="Выйти" style="font-size: 16px;"><svg style="width:20px;height:20px;stroke:var(--text-main)"><use href="#icon-logout"></use></svg></button>
             </div>
         </div>
@@ -240,8 +244,9 @@
                   if (typeof window.showCustomConfirm === 'function') {
                     window.showCustomConfirm(
                       'Обновление',
-                      'Доступна новая версия мессенджера! Перезагрузить страницу для обновления?',
-                      () => window.location.reload()
+                      'Приложение обновлено. Нажмите ОК для перезагрузки.',
+                      () => window.location.reload(),
+                      true // Этот параметр мы добавим в scripts.js для режима одной кнопки
                     );
                   } else {
                     setTimeout(showUpdateConfirm, 100);

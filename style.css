@@ -318,11 +318,6 @@ ul { list-style: none; }
 .msg-in { align-self: flex-start; }
 .msg-out { align-self: flex-end; flex-direction: row-reverse; }
 
-.msg-read-check {
-    color: #ffffff; 
-    font-weight: bold;
-}
-
 .msg-bubble {
     padding: 12px 16px; border-radius: 20px; font-size: 15px; line-height: 1.4;
     box-shadow: 0 4px 15px rgba(0,0,0,0.1); position: relative;
@@ -332,6 +327,14 @@ ul { list-style: none; }
 
 .msg-meta { display: flex; justify-content: flex-end; align-items: center; gap: 5px; margin-top: 5px; font-size: 11px; opacity: 0.7; }
 .msg-status svg { width: 14px; height: 14px; fill: currentColor; }
+
+.msg-status.read {
+    color: var(--online);
+    opacity: 1;
+}
+.msg-status.read svg {
+    fill: var(--online);
+}
 
 .msg-attachment { border-radius: 10px; max-width: 100%; margin-top: 8px; cursor: pointer; transition: transform 0.2s;}
 .msg-attachment:hover { transform: scale(1.02); }

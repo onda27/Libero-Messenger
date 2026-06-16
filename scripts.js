@@ -139,7 +139,7 @@ function getAuthErrorMessage(error) {
     return 'Произошла ошибка при авторизации.';
 }
 
-function showCustomConfirm(title, text, onConfirm) {
+function showCustomConfirm(title, text, onConfirm, singleButtonMode = false) {
     if (!customConfirmModal) {
         if (onConfirm) onConfirm();
         return;
@@ -147,6 +147,15 @@ function showCustomConfirm(title, text, onConfirm) {
     customConfirmTitle.textContent = title;
     customConfirmText.textContent = text;
     confirmCallback = onConfirm;
+    
+    if (singleButtonMode) {
+        customConfirmNoBtn.style.display = 'none';
+        customConfirmYesBtn.textContent = 'ОК';
+    } else {
+        customConfirmNoBtn.style.display = 'inline-block';
+        customConfirmYesBtn.textContent = 'Да'; 
+    }
+    
     customConfirmModal.classList.add('active');
 }
 
@@ -514,16 +523,16 @@ async function setOnlineStatus(isOnline) {
     }
 }
 
-// Отслеживаем активность вкладки
-window.addEventListener('focus', () => setOnlineStatus(true));
-window.addEventListener('blur', () => setOnlineStatus(false));
-window.addEventListener('beforeunload', () => {
-    if (currentUser) {
-        updateDoc(doc(db, "users", currentUser.uid), {
-            online: false,
-            lastSeen: new Date()
-        });
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        setOnlineStatus(true);
+    } else {
+        setOnlineStatus(false);
     }
+});
+
+window.addEventListener('pagehide', () => {
+    setOnlineStatus(false);
 });
 
 /* === РЕАЛ-ТАЙМ СЛУШАТЕЛИ ЗАЯВОК И ДРУЗЕЙ === */
@@ -806,19 +815,20 @@ async function sendMessage() {
     const text = messageInput.value.trim();
     if (!text || !currentChatFriend) return;
 
+    // Очищаем интерфейс мгновенно
+    messageInput.value = '';
+    messageInput.style.height = 'inherit';
+    micBtn.style.display = 'flex';
+    sendBtn.style.display = 'none';
+
     try {
         await addDoc(collection(db, 'messages'), {
             senderUid: currentUser.uid,
             receiverUid: currentChatFriend.uid,
             text: text,
             createdAt: Date.now(),
-            isRead: false // Добавили поле статуса прочтения
+            isRead: false 
         });
-
-        messageInput.value = '';
-        messageInput.style.height = 'inherit';
-        micBtn.style.display = 'flex';
-        sendBtn.style.display = 'none';
     } catch (e) {
         console.error("Ошибка отправки сообщения:", e);
         showNotification(getAuthErrorMessage(e), 'error');
@@ -929,19 +939,20 @@ function appendMessageNode(text, isOut, time, isRead) {
     const div = document.createElement('div');
     div.className = `message ${isOut ? 'msg-out' : 'msg-in'}`;
     
-    // Одна галочка если отправлено, две если прочитано
+    // ДОБАВЛЕНО: Присваиваем класс 'read', если сообщение прочитано
     const tickIcon = isRead ? '#icon-check-double' : '#icon-check';
+    const tickClass = isRead ? 'msg-status read' : 'msg-status';
     
     div.innerHTML = `
         <div class="msg-bubble">
             ${text}
             <div class="msg-meta">
                 <span>${time}</span>
-                ${isOut ? `<span class="msg-status"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
+                ${isOut ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
             </div>
         </div>
     `;
-    messagesArea.appendChild(div); // Добавляем в конец (порядок теперь правильный)
+    messagesArea.appendChild(div); 
 }
 
 function scrollToBottom() {
@@ -949,24 +960,30 @@ function scrollToBottom() {
 }
 
 /* === UI ПЕРЕКЛЮЧАТЕЛИ И ЗВОНКИ === */
-const themeToggleBtn = document.getElementById('themeToggleBtn');
-const themeToggleBtn2 = document.getElementById('themeToggleBtn2');
-const backBtnMobile = document.getElementById('backBtnMobile');
+const html = document.documentElement;
+const themeIcon = document.getElementById('themeIcon');
 
-themeToggleBtn.addEventListener('click', toggleTheme);
-themeToggleBtn2.addEventListener('click', toggleTheme);
+// Проверяем сохраненную тему при запуске
+const savedTheme = localStorage.getItem('libero_theme') || 'dark';
+setTheme(savedTheme);
 
-function toggleTheme() {
-    const html = document.documentElement;
-    if(html.getAttribute('data-theme') === 'dark') {
-        html.setAttribute('data-theme', 'light');
-    } else {
-        html.setAttribute('data-theme', 'dark');
+themeToggleBtn.addEventListener('click', () => {
+    const newTheme = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+});
+
+function setTheme(themeName) {
+    html.setAttribute('data-theme', themeName);
+    localStorage.setItem('libero_theme', themeName);
+    // Меняем иконку (солнце для темной, луна для светлой)
+    if(themeIcon) {
+        themeIcon.innerHTML = `<use href="${themeName === 'dark' ? '#icon-sun' : '#icon-moon'}"></use>`;
     }
 }
 
 backBtnMobile.addEventListener('click', () => {
     document.getElementById('sidebar').classList.remove('hidden-mobile');
+    closeChat(); // Жестко сбрасываем состояние активного чата
 });
 
 // Кнопка информации о чате
