@@ -1076,15 +1076,13 @@ function sendPushNotification(title, body) {
 
 // Глобальный слушатель новых сообщений
 function startGlobalNotificationListener() {
-    // 1. Проверяем и запрашиваем права через твое кастомное окно
+    // Запрашиваем права через кастомное окно
     if ("Notification" in window && Notification.permission === "default") {
-        // Задержка в 1 секунду, чтобы интерфейс чатов успел прогрузиться после авторизации
         setTimeout(() => {
             window.showCustomConfirm(
                 'Уведомления',
                 'Включите уведомления, чтобы не пропускать новые сообщения, когда приложение свернуто.',
                 () => {
-                    // Системный запрос вызывается ТОЛЬКО после клика пользователя
                     Notification.requestPermission().then(permission => {
                         if (permission === 'granted') {
                             showNotification('Уведомления успешно включены!', 'success');
@@ -1097,7 +1095,6 @@ function startGlobalNotificationListener() {
         }, 1000);
     }
 
-    // 2. Слушаем новые сообщения
     const unreadQuery = query(
         collection(db, 'messages'),
         where('receiverUid', '==', currentUser.uid),
@@ -1105,7 +1102,7 @@ function startGlobalNotificationListener() {
     );
 
     onSnapshot(unreadQuery, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
+        snapshot.docChanges().forEach(async (change) => { // Добавили async сюда
             if (change.type === 'added') {
                 const msg = change.doc.data();
                 
@@ -1115,7 +1112,20 @@ function startGlobalNotificationListener() {
 
                 if (isTabHidden || isDifferentChat) {
                     const textStr = msg.type === 'image' ? '📸 Отправил(а) фото' : msg.text;
-                    sendPushNotification('Новое сообщение в Libero', textStr);
+                    
+                    // Получаем логин отправителя из базы
+                    let senderName = 'Новое сообщение';
+                    try {
+                        const senderSnap = await getDoc(doc(db, 'users', msg.senderUid));
+                        if (senderSnap.exists()) {
+                            senderName = senderSnap.data().username;
+                        }
+                    } catch (e) {
+                        console.error('Ошибка получения имени для уведомления:', e);
+                    }
+
+                    // Отправляем пуш, где Заголовок = Логин друга, а Тело = текст сообщения
+                    sendPushNotification(senderName, textStr);
                 }
             }
         });
