@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'libero-v70';
+const CACHE_NAME = 'libero-v80';
 const ASSETS = [
   './',
   './index.html',
@@ -89,4 +89,29 @@ self.addEventListener('notificationclick', (event) => {
       }
     })
   );
+});
+
+// Слушаем входящие пуш-уведомления от сервера (Supabase)
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  try {
+    // Ожидаем, что сервер пришлет JSON с title и body
+    const data = event.data.json();
+    
+    const options = {
+      body: data.body,
+      icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
+      vibrate: [200, 100, 200],
+      data: {
+        url: self.location.origin // Чтобы при клике открывался мессенджер
+      }
+    };
+
+    event.waitUntil(
+      self.registration.showNotification(data.title, options)
+    );
+  } catch (err) {
+    console.error('Ошибка обработки Push:', err);
+  }
 });

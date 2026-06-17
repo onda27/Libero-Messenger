@@ -18,8 +18,24 @@ import {
     onSnapshot,
     updateDoc,
     deleteDoc,
+    updateDoc,
+    deleteField,
     limit
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+import { supabase } from './supabase.js';
+import { signOut } from "firebase/auth";
+
+function urlB64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
 
 /* === ЛОКАЛЬНОЕ СОСТОЯНИЕ === */
 let currentUser = null; // { uid, username }
@@ -386,6 +402,25 @@ logoutBtn.addEventListener('click', () => {
             'Вы уверены, что хотите выйти из мессенджера?',
             async () => {
                 try {
+                    // --- НОВОЕ: Отписываемся от пуш-уведомлений и удаляем токен из БД ---
+                    if (currentUser && currentUser.uid) {
+                        try {
+                            if ('serviceWorker' in navigator && 'PushManager' in window) {
+                                const registration = await navigator.serviceWorker.ready;
+                                const subscription = await registration.pushManager.getSubscription();
+                                if (subscription) {
+                                    await subscription.unsubscribe();
+                                }
+                            }
+                            await updateDoc(doc(db, 'users', currentUser.uid), {
+                                pushSubscription: deleteField()
+                            });
+                        } catch (error) {
+                            console.error('Ошибка при удалении push-подписки:', error);
+                        }
+                    }
+                    // ----------------------------------------------------------------------
+
                     // 1. Отписываемся от слушателей Firebase
                     if (unsubscribeMessages) { unsubscribeMessages(); unsubscribeMessages = null; }
                     if (unsubscribeFriends) { unsubscribeFriends(); unsubscribeFriends = null; }
@@ -849,13 +884,13 @@ async function sendMessage() {
     const text = messageInput.value.trim();
     if (!text || !currentChatFriend) return;
 
-    // Очищаем интерфейс мгновенно
     messageInput.value = '';
     messageInput.style.height = 'inherit';
     micBtn.style.display = 'flex';
     sendBtn.style.display = 'none';
 
     try {
+        // 1. Сохраняем сообщение в Firebase (Твой текущий код)
         await addDoc(collection(db, 'messages'), {
             senderUid: currentUser.uid,
             receiverUid: currentChatFriend.uid,
@@ -863,6 +898,27 @@ async function sendMessage() {
             createdAt: Date.now(),
             isRead: false 
         });
+
+        // 2. ДОБАВЛЕНО: Отправляем Push через Supabase Edge Function
+        // Получаем профиль друга из Firestore, чтобы достать его токен подписки
+        const friendDoc = await getDoc(doc(db, 'users', currentChatFriend.uid));
+        if (friendDoc.exists()) {
+            const pushSubStr = friendDoc.data().pushSubscription;
+            
+            // Если друг разрешил уведомления, дергаем функцию
+            if (pushSubStr) {
+                const subscriptionObject = JSON.parse(pushSubStr);
+                
+                await supabase.functions.invoke('send-push', {
+                    body: {
+                        subscription: subscriptionObject,
+                        title: currentUser.username, // Имя отправителя
+                        body: text // Текст сообщения
+                    }
+                });
+            }
+        }
+
     } catch (e) {
         console.error("Ошибка отправки сообщения:", e);
         showNotification(getAuthErrorMessage(e), 'error');
@@ -1182,56 +1238,49 @@ function clearNotificationsBySender(senderUid) {
 }
 
 // Глобальный слушатель новых сообщений
-function startGlobalNotificationListener() {
-    if ("Notification" in window && Notification.permission === "default") {
-        setTimeout(() => {
-            window.showCustomConfirm(
-                'Уведомления',
-                'Включите уведомления, чтобы не пропускать новые сообщения, когда приложение свернуто.',
-                () => {
-                    Notification.requestPermission().then(permission => {
-                        if (permission === 'granted') {
-                            showNotification('Уведомления успешно включены!', 'success');
-                        } else {
-                            showNotification('Уведомления отклонены', 'error');
-                        }
-                    });
-                }
-            );
-        }, 1000);
+// ВСТАВЬ СЮДА СВОЙ ПУБЛИЧНЫЙ КЛЮЧ ИЗ ШАГА 1
+const VAPID_PUBLIC_KEY = 'BPhHDbs6dN2oztI8bOFA7ifoWdEbcMFeqZjZ4eRFEQnW8X7BqbJ3Y9AO506IgFKTDGuzloxBRnktDnmYywbjHXU'; 
+
+async function startGlobalNotificationListener() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    // Спрашиваем разрешение
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    try {
+        const registration = await navigator.serviceWorker.ready;
+        
+        // Проверяем, есть ли уже подписка
+        let subscription = await registration.pushManager.getSubscription();
+        
+        // Если нет — подписываем устройство на серверные пуши
+        if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+            });
+        }
+
+        // Сохраняем подписку в профиль юзера в Firestore
+        if (currentUser && currentUser.uid) {
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+                pushSubscription: JSON.stringify(subscription)
+            });
+        }
+    } catch (err) {
+        console.error('Ошибка подписки на Push:', err);
     }
 
+    // Твой старый код для отслеживания непрочитанных сообщений, если приложение открыто
     const unreadQuery = query(
         collection(db, 'messages'),
         where('receiverUid', '==', currentUser.uid),
         where('isRead', '==', false)
     );
-
     onSnapshot(unreadQuery, (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
-            if (change.type === 'added') {
-                const msg = change.doc.data();
-                
-                const isTabHidden = document.visibilityState === 'hidden';
-                const isDifferentChat = !currentChatFriend || currentChatFriend.uid !== msg.senderUid;
-
-                if (isTabHidden || isDifferentChat) {
-                    const textStr = msg.type === 'image' ? '📸 Отправил(а) фото' : msg.text;
-                    
-                    let senderName = 'Новое сообщение';
-                    try {
-                        const senderSnap = await getDoc(doc(db, 'users', msg.senderUid));
-                        if (senderSnap.exists()) {
-                            senderName = senderSnap.data().username;
-                        }
-                    } catch (e) {
-                        console.error('Ошибка получения имени для уведомления:', e);
-                    }
-
-                    sendPushNotification(senderName, textStr, msg.senderUid);
-                }
-            }
-        });
+        // Оставляем пустой или добавляем логику бейджей/звука внутри открытого приложения
+        // Локальные пуши отсюда мы убираем, чтобы они не дублировались с серверными
     });
 }
 
