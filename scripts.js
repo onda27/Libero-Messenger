@@ -372,9 +372,54 @@ setupUsernameBtn.addEventListener('click', async () => {
     }
 });
 
-// Кнопка выхода
-logoutBtn.addEventListener('click', () => {
-    showCustomConfirm('Выход', 'Вы уверены, что хотите выйти?', () => signOut(auth));
+logoutBtn.addEventListener('click', async () => {
+    try {
+        // 1. Отписываемся от всех активных слушателей Firebase, чтобы не тратить трафик
+        if (unsubscribeMessages) { unsubscribeMessages(); unsubscribeMessages = null; }
+        if (unsubscribeFriends) { unsubscribeFriends(); unsubscribeFriends = null; }
+        if (unsubscribeRequests) { unsubscribeRequests = null; }
+        
+        // Отписываемся от индивидуальных статусов друзей (онлайн/офлайн)
+        if (typeof friendListeners === 'object') {
+            Object.keys(friendListeners).forEach(uid => {
+                if (typeof friendListeners[uid] === 'function') friendListeners[uid]();
+            });
+            friendListeners = {};
+        }
+
+        // 2. ТОТАЛЬНО ВЫЧИЩАЕМ интерфейс из HTML. Удаляем всё мясо, чтобы сзади была пустота!
+        if (friendsListContainer) friendsListContainer.innerHTML = '';
+        if (requestsListContainer) requestsListContainer.innerHTML = '';
+        if (messagesArea) messagesArea.innerHTML = '';
+        if (chatTargetName) chatTargetName.textContent = 'Выберите, кому хотите написать';
+        if (chatTargetStatus) {
+            chatTargetStatus.className = 'chat-target-status';
+            chatTargetStatus.textContent = '';
+        }
+        
+        // Сбрасываем кэш цветов аватаров и юзеров
+        userColorsCache = {};
+        currentUser = null;
+        currentChatFriend = null;
+
+        // 3. Выходим из сессии Firebase
+        await signOut(auth);
+
+        // 4. СБРАСЫВАЕМ ЭКРАНЫ: Жестко прячем чат и принудительно включаем чистую форму логина
+        if (appContainer) appContainer.classList.add('hidden');
+        
+        activeTab = 'login';
+        if (typeof switchAuthTab === 'function') {
+            switchAuthTab('login'); // Переключаем вкладку на «Вход»
+        }
+        
+        if (authContainer) authContainer.classList.remove('hidden');
+
+        showNotification('Вы вышли из аккаунта', 'success');
+    } catch (err) {
+        console.error('Ошибка при выходе:', err);
+        showNotification(getAuthErrorMessage(err), 'error');
+    }
 });
 
 function stopAllSubscriptions() {
@@ -1199,3 +1244,28 @@ function startGlobalNotificationListener() {
         });
     });
 }
+
+// Функция автоматической очистки уведомлений из центра уведомлений ОС
+function clearAllAppNotifications() {
+    if ('serviceWorker' in navigator && 'Notification' in window) {
+        navigator.serviceWorker.ready.then((registration) => {
+            // Запрашиваем все активные уведомления этого воркера
+            registration.getNotifications().then((notifications) => {
+                notifications.forEach((notification) => {
+                    // Закрываем каждое уведомление, удаляя его из шторки телефона / центра ПК
+                    notification.close();
+                });
+            });
+        }).catch(err => console.error('Не удалось очистить уведомления:', err));
+    }
+}
+
+// Вызываем очистку при загрузке страницы
+clearAllAppNotifications();
+
+// Вызываем очистку, когда пользователь просто разворачивает вкладку с сайтом
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        clearAllAppNotifications();
+    }
+});
