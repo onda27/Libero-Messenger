@@ -448,6 +448,8 @@ logoutBtn.addEventListener('click', () => {
 
                     // 2. Выходим из Firebase
                     await signOut(auth);
+
+                    window.history.pushState({}, '', window.location.pathname);
                     
                     // 3. Перезагружаем страницу для идеальной очистки интерфейса и памяти
                     window.location.reload();
@@ -838,15 +840,28 @@ function closeChat() {
     messagesArea.style.display = 'none';
     chatInputArea.style.display = 'none';
     if (unsubscribeMessages) unsubscribeMessages();
+
+    // НОВОЕ: Очищаем URL, чтобы Service Worker знал, что мы вышли из чата
+    window.history.pushState({}, '', window.location.pathname);
 }
 
 function selectFriendChat(friend) {
     currentChatFriend = friend;
 
-    // --- ИСПРАВЛЕНИЕ: Записываем ID чата в адресную строку без перезагрузки ---
-    // Это нужно, чтобы Service Worker понимал, что чат открыт, и не слал пуши
-    window.history.replaceState({}, document.title, `${window.location.pathname}?chatWith=${friend.uid}`);
-    // ------------------------------------------------------------------------
+        // 1. МЕНЯЕМ URL БЕЗ ПЕРЕЗАГРУЗКИ СТРАНИЦЫ
+        // Это нужно, чтобы Service Worker увидел в ссылке, с кем мы общаемся
+        const newUrl = window.location.origin + window.location.pathname + `?chatWith=${currentChatFriend.uid}`;
+        window.history.pushState({ path: newUrl }, '', newUrl);
+
+        // 2. СМАХИВАЕМ УВЕДОМЛЕНИЯ ЭТОГО ЮЗЕРА
+        // (У тебя там была функция clearNotificationsBySender, вот так она должна работать под капотом):
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready.then(reg => {
+                reg.getNotifications({ tag: currentChatFriend.uid }).then(notifications => {
+                    notifications.forEach(notification => notification.close());
+                });
+            });
+        }
 
     // Скрываем заглушку и показываем чат
     noChatSelectedScreen.style.display = 'none';
@@ -1305,3 +1320,21 @@ document.addEventListener('visibilitychange', () => {
         setOnlineStatus(false);
     }
 });
+// --- ЛОВИМ КЛИК ПО УВЕДОМЛЕНИЮ ИЗ SERVICE WORKER ---
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'OPEN_CHAT') {
+            const senderUid = event.data.senderUid;
+            if (senderUid) {
+                // ИСПРАВЛЕННЫЙ СЕЛЕКТОР: ищем по правильному ID
+                const friendElement = document.getElementById(`chat-item-${senderUid}`);
+                if (friendElement) {
+                    friendElement.click(); // Открываем чат плавно
+                } else {
+                    // Если друга нет в списке (например, скрыт), тогда уже грузим через URL
+                    window.location.href = `?chatWith=${senderUid}`;
+                }
+            }
+        }
+    });
+}

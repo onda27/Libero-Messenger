@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'libero-v84';
+const CACHE_NAME = 'libero-v87';
 const ASSETS = [
   './',
   './index.html',
@@ -65,69 +65,69 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Слушаем входящие пуш-уведомления от сервера (Supabase)
-self.addEventListener('push', (event) => {
-  if (!event.data) return;
+// В sw.js
 
+self.addEventListener('push', (event) => {
   event.waitUntil((async () => {
-    const data = event.data.json();
-    
-    // 1. Получаем список всех открытых вкладок нашего сайта
-    const clientList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-    
-    // 2. Проверяем, сфокусирована ли вкладка, где открыт именно этот чат
-    let isChatActive = false;
-    for (const client of clientList) {
-      if (client.focused && client.url.includes(`chatWith=${data.senderUid}`)) {
-        isChatActive = true;
+    const data = event.data ? event.data.json() : {};
+    const senderUid = data.senderUid;
+
+    // 1. Проверяем все открытые окна/вкладки приложения
+    const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    let isChatVisible = false;
+
+    for (let client of windowClients) {
+      // 2. Если вкладка активна (мы на ней) И URL указывает на чат с этим отправителем
+      if (client.visibilityState === 'visible' && client.url.includes(`chatWith=${senderUid}`)) {
+        isChatVisible = true;
         break;
       }
     }
 
-    // 3. Если чат активен — уведомление не показываем
-    if (isChatActive) return;
+    // 3. Если мы УЖЕ в чате с ним — просто глушим пуш (ничего не показываем)
+    if (isChatVisible) {
+      return;
+    }
 
-    // 4. Если чат не активен — показываем
+    // Иначе показываем уведомление
     const basePath = self.location.pathname.replace('sw.js', '');
-    const chatUrl = data.senderUid 
-      ? `${self.location.origin}${basePath}?chatWith=${data.senderUid}`
+    const chatUrl = senderUid 
+      ? `${self.location.origin}${basePath}?chatWith=${senderUid}`
       : `${self.location.origin}${basePath}`;
 
     const options = {
       body: data.body,
       icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
-      tag: data.senderUid, // тег позволяет группировать уведомления от одного человека
-      data: { url: chatUrl }
+      tag: senderUid, // Обязательно группируем по отправителю
+      data: { url: chatUrl, senderUid: senderUid }
     };
 
-    self.registration.showNotification(data.title, options);
+    return self.registration.showNotification(data.title, options);
   })());
 });
 
-// Обработка клика по уведомлению
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
-  // Достаем сформированный URL из данных пуша
   const urlToOpen = event.notification.data?.url || self.location.origin;
+  const senderUid = event.notification.data?.senderUid;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Ищем, открыта ли вкладка нашего приложения
+      // Ищем открытую вкладку
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
-        
-        // Если вкладка открыта — перенаправляем её на URL с нужным чатом и фокусируемся
-        if (client.url.includes(self.location.origin) && 'navigate' in client) {
-          client.navigate(urlToOpen);
-          return client.focus();
+        if (client.url.includes(self.location.origin)) {
+          client.focus(); // Разворачиваем браузер
+          
+          // ТИХО отправляем команду в приложение сменить чат (БЕЗ ПЕРЕЗАГРУЗКИ)
+          if (senderUid && 'postMessage' in client) {
+            client.postMessage({ type: 'OPEN_CHAT', senderUid: senderUid });
+          }
+          return;
         }
       }
-      
-      // Если приложение вообще закрыто — открываем новую вкладку сразу с нужным чатом
-      if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
-      }
+      // Если ни одной вкладки нет (браузер закрыт), тогда открываем новую с нуля
+      return clients.openWindow(urlToOpen);
     })
   );
 });
