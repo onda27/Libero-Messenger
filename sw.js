@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'libero-v87';
+const CACHE_NAME = 'libero-v100';
 const ASSETS = [
   './',
   './index.html',
@@ -67,43 +67,47 @@ self.addEventListener('fetch', (e) => {
 
 // В sw.js
 
-self.addEventListener('push', (event) => {
-  event.waitUntil((async () => {
-    const data = event.data ? event.data.json() : {};
-    const senderUid = data.senderUid;
+self.addEventListener('push', function(event) {
+    if (!event.data) return;
+    
+    const data = event.data.json();
+    const senderUid = data.senderUid; // Убедись, что Supabase передает senderUid
 
-    // 1. Проверяем все открытые окна/вкладки приложения
-    const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-    let isChatVisible = false;
+    const promiseChain = clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true
+    }).then((windowClients) => {
+        let isChatCurrentlyFocused = false;
 
-    for (let client of windowClients) {
-      // 2. Если вкладка активна (мы на ней) И URL указывает на чат с этим отправителем
-      if (client.visibilityState === 'visible' && client.url.includes(`chatWith=${senderUid}`)) {
-        isChatVisible = true;
-        break;
-      }
-    }
+        for (let i = 0; i < windowClients.length; i++) {
+            const client = windowClients[i];
+            
+            // Если вкладка активна (видна пользователю)
+            if (client.visibilityState === 'visible') {
+                const url = new URL(client.url);
+                // Проверяем, совпадает ли параметр chatWith с тем, кто прислал пуш
+                if (url.searchParams.get('chatWith') === senderUid) {
+                    isChatCurrentlyFocused = true;
+                    break;
+                }
+            }
+        }
 
-    // 3. Если мы УЖЕ в чате с ним — просто глушим пуш (ничего не показываем)
-    if (isChatVisible) {
-      return;
-    }
+        // Если пользователь уже смотрит в этот чат — ничего не показываем!
+        if (isChatCurrentlyFocused) {
+            return null;
+        }
 
-    // Иначе показываем уведомление
-    const basePath = self.location.pathname.replace('sw.js', '');
-    const chatUrl = senderUid 
-      ? `${self.location.origin}${basePath}?chatWith=${senderUid}`
-      : `${self.location.origin}${basePath}`;
+        // В противном случае показываем стандартное уведомление
+        return self.registration.showNotification(data.title, {
+            body: data.body,
+            icon: '/path-to-your-icon.png',
+            tag: senderUid, // tag заменяет старые пуши от этого же юзера новыми
+            data: { senderUid: senderUid }
+        });
+    });
 
-    const options = {
-      body: data.body,
-      icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
-      tag: senderUid, // Обязательно группируем по отправителю
-      data: { url: chatUrl, senderUid: senderUid }
-    };
-
-    return self.registration.showNotification(data.title, options);
-  })());
+    event.waitUntil(promiseChain);
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -35,6 +35,8 @@ function urlB64ToUint8Array(base64String) {
     return outputArray;
 }
 
+window.pendingChatUid = null;
+
 /* === ЛОКАЛЬНОЕ СОСТОЯНИЕ === */
 let currentUser = null; // { uid, username }
 let currentChatFriend = null; // { uid, username, color }
@@ -297,28 +299,9 @@ onAuthStateChanged(auth, async (firebaseUser) => {
                     const chatWithUid = urlParams.get('chatWith');
                     
                     if (chatWithUid) {
-                        try {
-                            // Запрашиваем данные пользователя, которому принадлежит этот UID
-                            const friendSnap = await getDoc(doc(db, 'users', chatWithUid));
-                            if (friendSnap.exists()) {
-                                const friendData = friendSnap.data();
-                                
-                                // Формируем объект друга для функции openChat
-                                const friendObject = {
-                                    uid: chatWithUid,
-                                    username: friendData.username,
-                                    color: friendData.avatarColor || '#6366f1' // дефолтный цвет если нет
-                                };
-                                
-                                // Очищаем параметры из адресной строки браузера, чтобы при обычном рефреше чат не открывался заново
-                                window.history.replaceState({}, document.title, window.location.pathname);
-                                
-                                // Открываем чат! (Убедись, что функция openChat доступна или объявлена выше)
-                                selectFriendChat(friendObject);
-                            }
-                        } catch (error) {
-                            console.error('Ошибка автоматического открытия чата из пуша:', error);
-                        }
+                        window.pendingChatUid = chatWithUid; // Запоминаем, кого нужно открыть
+                        // Очищаем URL, чтобы не было повторных открытий при F5
+                        window.history.replaceState({}, document.title, window.location.pathname);
                     }
             } else {
                 // Новый юзер: прячем вход, включаем шаг 2
@@ -772,6 +755,18 @@ function renderFriendsList(friends) {
 
         // Запускаем слушатели сообщений и статуса
         listenLastMessage(friend.uid);
+
+        // ДОБАВИТЬ В КОНЕЦ ФУНКЦИИ:
+    if (window.pendingChatUid) {
+        const targetFriend = friends.find(f => f.uid === window.pendingChatUid);
+        if (targetFriend) {
+            selectFriendChat(targetFriend);
+        } else {
+            // Если пользователя нет в друзьях, но мы пытаемся открыть с ним чат
+            console.warn('Попытка открыть чат с пользователем не из списка друзей');
+        }
+        window.pendingChatUid = null; // Сбрасываем после открытия
+    }
     });
 }
 
@@ -1320,20 +1315,30 @@ document.addEventListener('visibilitychange', () => {
         setOnlineStatus(false);
     }
 });
-// --- ЛОВИМ КЛИК ПО УВЕДОМЛЕНИЮ ИЗ SERVICE WORKER ---
+// Создаем надежную функцию открытия чата из любого состояния
+window.forceOpenChat = async (uid) => {
+    try {
+        const friendSnap = await getDoc(doc(db, 'users', uid));
+        if (friendSnap.exists()) {
+            const data = friendSnap.data();
+            selectFriendChat({ 
+                uid: uid, 
+                username: data.username, 
+                color: data.avatarColor || '#6366f1' 
+            });
+        }
+    } catch (error) {
+        console.error('Ошибка принудительного открытия чата:', error);
+    }
+};
+
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data && event.data.type === 'OPEN_CHAT') {
             const senderUid = event.data.senderUid;
             if (senderUid) {
-                // ИСПРАВЛЕННЫЙ СЕЛЕКТОР: ищем по правильному ID
-                const friendElement = document.getElementById(`chat-item-${senderUid}`);
-                if (friendElement) {
-                    friendElement.click(); // Открываем чат плавно
-                } else {
-                    // Если друга нет в списке (например, скрыт), тогда уже грузим через URL
-                    window.location.href = `?chatWith=${senderUid}`;
-                }
+                // Вызываем нашу новую функцию напрямую, без костылей с .click()
+                window.forceOpenChat(senderUid);
             }
         }
     });
