@@ -21,6 +21,9 @@ import {
     limit
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+import { auth, db, messaging } from './firebase.js'; // Добавили messaging сюда
+import { getToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
+
 /* === ЛОКАЛЬНОЕ СОСТОЯНИЕ === */
 let currentUser = null; // { uid, username }
 let currentChatFriend = null; // { uid, username, color }
@@ -54,6 +57,46 @@ function getUserColor(uid) {
         userColorsCache[uid] = avatarsBg[index];
     }
     return userColorsCache[uid];
+}
+
+// Функция запроса прав на Push-уведомления и сохранения FCM-токена
+async function requestFcmToken(userId) {
+    try {
+        // 1. Проверяем, поддерживает ли браузер уведомления вообще
+        if (!("Notification" in window)) {
+            console.warn("Этот браузер не поддерживает Push-уведомления.");
+            return;
+        }
+
+        // 2. Запрашиваем стандартное системное разрешение у пользователя
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            console.log('Пользователь отказался от Push-уведомлений.');
+            return;
+        }
+
+        // 3. Ждем, пока твой Service Worker полностью активируется и зарегистрируется
+        const registration = await navigator.serviceWorker.ready;
+
+        // 4. Запрашиваем токен у серверов Google Firebase
+        const fcmToken = await getToken(messaging, {
+            vapidKey: 'BMONcBixweHS1I8O2hHor2CB3l__R-2cfpHw1NSwLt9c_QXqUtpLzZWAu656EH94BHbsTs7NTsVfCjDnct4ysVQ',
+            serviceWorkerRegistration: registration // Передаем твой sw.js, чтобы не плодить лишние файлы
+        });
+
+        if (fcmToken) {
+            console.log('FCM Токен успешно получен:', fcmToken);
+            
+            // 5. Записываем/обновляем токен в документе пользователя в Firestore
+            await updateDoc(doc(db, 'users', userId), {
+                fcmToken: fcmToken
+            });
+        } else {
+            console.log('Не удалось сгенерировать токен. Проверь настройки консоли.');
+        }
+    } catch (error) {
+        console.error('Ошибка при настройке Firebase Messaging:', error);
+    }
 }
 
 /* === УВЕДОМЛЕНИЯ И ПОДТВЕРЖДЕНИЯ === */
@@ -277,6 +320,8 @@ onAuthStateChanged(auth, async (firebaseUser) => {
                 startListeningRequestsAndFriends();
                 startGlobalNotificationListener();
                 setOnlineStatus(true);
+
+                requestFcmToken(currentUser.uid);
             } else {
                 // Новый юзер: прячем вход, включаем шаг 2
                 mainAuthCard.style.display = 'none'; 
