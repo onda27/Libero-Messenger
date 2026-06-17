@@ -829,6 +829,10 @@ const sendBtn = document.getElementById('sendBtn');
 const micBtn = document.getElementById('micBtn');
 
 function closeChat() {
+    // Сбрасываем активный чат в Service Worker'е
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'SET_ACTIVE_CHAT', uid: null });
+    }
     currentChatFriend = null;
     noChatSelectedScreen.style.display = 'flex';
     chatHeader.style.display = 'none';
@@ -841,6 +845,10 @@ function closeChat() {
 }
 
 function selectFriendChat(friend) {
+    // Сообщаем Service Worker'у, кто сейчас открыт
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'SET_ACTIVE_CHAT', uid: friend.uid });
+    }
     currentChatFriend = friend;
 
         // 1. МЕНЯЕМ URL БЕЗ ПЕРЕЗАГРУЗКИ СТРАНИЦЫ
@@ -1317,14 +1325,23 @@ document.addEventListener('visibilitychange', () => {
 });
 // Создаем надежную функцию открытия чата из любого состояния
 window.forceOpenChat = async (uid) => {
+    // Защита от пустых вызовов
+    if (!uid) return;
+
+    // Если профиль еще не прогрузился (например, при открытии свернутого приложения), 
+    // ставим чат в очередь, он откроется сам после логина
+    if (!currentUser) {
+        window.pendingChatUid = uid;
+        return;
+    }
+
     try {
         const friendSnap = await getDoc(doc(db, 'users', uid));
         if (friendSnap.exists()) {
             const data = friendSnap.data();
             selectFriendChat({ 
                 uid: uid, 
-                username: data.username, 
-                color: data.avatarColor || '#6366f1' 
+                username: data.username
             });
         }
     } catch (error) {
