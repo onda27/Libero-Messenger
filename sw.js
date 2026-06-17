@@ -1,35 +1,5 @@
-importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
-
-// 2. Инициализируем проект внутри воркера (конфиг берем тот же самый)
-firebase.initializeApp({
-  apiKey: "AIzaSyDwfMxbM8DG7T3MllkjtYY1R2PPRYvfYHg",
-  authDomain: "katik-messenger.firebaseapp.com",
-  projectId: "katik-messenger",
-  storageBucket: "katik-messenger.firebasestorage.app",
-  messagingSenderId: "528309622983",
-  appId: "1:528309622983:web:faa6c893c6a36013eac6e2" 
-});
-
-const messaging = firebase.messaging();
-
-// 3. Вешаем слушатель на получение уведомлений, когда вкладка закрыта или свернута
-messaging.onBackgroundMessage((payload) => {
-  print('[Service Worker] Получено уведомление в фоне: ', payload);
-
-  const notificationTitle = payload.notification.title || 'Новое сообщение';
-  const notificationOptions = {
-    body: payload.notification.body || '',
-    icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png', // Твоя иконка мессенджера
-    data: {
-      url: payload.data?.url || '/' // Передаем ссылку для клика
-    }
-  };
-
-  self.registration.showNotification(notificationTitle, notificationOptions);
-});
-
-const CACHE_NAME = 'libero-v67';
+// sw.js
+const CACHE_NAME = 'libero-v70';
 const ASSETS = [
   './',
   './index.html',

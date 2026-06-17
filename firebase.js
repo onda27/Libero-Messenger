@@ -2,8 +2,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-// 1. ДОБАВЛЯЕМ ИМПОРТ MESSAGING
-import { getMessaging } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDwfMxbM8DG7T3MllkjtYY1R2PPRYvfYHg",
@@ -18,6 +16,3 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
-
-// 2. ИНИЦИАЛИЗИРУЕМ И ЭКСПОРТИРУЕМ MESSAGING
-export const messaging = getMessaging(app);
