@@ -271,16 +271,17 @@ onAuthStateChanged(auth, async (firebaseUser) => {
                 
                 authContainer.classList.add('hidden');
                 appContainer.classList.add('active');
-                usernameCard.style.display = 'none'; // Скрываем карточку шага 2
+                usernameCard.style.display = 'none'; 
 
                 closeChat();
                 startListeningRequestsAndFriends();
-                startGlobalNotificationListener()
+                startGlobalNotificationListener();
                 setOnlineStatus(true);
             } else {
                 // Новый юзер: прячем вход, включаем шаг 2
                 mainAuthCard.style.display = 'none'; 
                 usernameCard.style.display = 'block'; 
+                authContainer.classList.remove('hidden');
             }
         } catch (err) {
             console.error("Ошибка проверки профиля:", err);
@@ -290,14 +291,17 @@ onAuthStateChanged(auth, async (firebaseUser) => {
             if (err?.code === 'permission-denied' || err?.message?.includes('Missing or insufficient permissions')) {
                 await signOut(auth);
             }
+        } finally {
+            // ВАЖНО: Убираем экран загрузки, когда профиль успешно проверен/скачан
+            document.body.classList.remove('auth-loading');
         }
     } else {
         currentUser = null;
         stopAllSubscriptions();
         
         authContainer.classList.remove('hidden');
-        mainAuthCard.style.display = 'block'; // Возвращаем форму входа
-        usernameCard.style.display = 'none';  // Скрываем шаг 2
+        mainAuthCard.style.display = 'block'; 
+        usernameCard.style.display = 'none';  
         
         authEmailInput.value = '';
         authPasswordInput.value = '';
@@ -310,6 +314,9 @@ onAuthStateChanged(auth, async (firebaseUser) => {
 
         authSubmitBtn.disabled = false;
         authSubmitBtn.textContent = activeTab === 'login' ? 'Войти' : 'Зарегистрироваться';
+
+        // ВАЖНО: Убираем экран загрузки для неавторизованного юзера (покажется форма входа)
+        document.body.classList.remove('auth-loading');
     }
 });
 
