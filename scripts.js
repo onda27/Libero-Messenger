@@ -373,30 +373,23 @@ setupUsernameBtn.addEventListener('click', async () => {
 });
 
 logoutBtn.addEventListener('click', () => {
-    // Вызываем твое кастомное окно подтверждения
     if (typeof window.showCustomConfirm === 'function') {
         window.showCustomConfirm(
             'Выход из аккаунта',
             'Вы уверены, что хотите выйти из мессенджера?',
             async () => {
-                // Этот код сработает, только если юзер нажмет "ОК"
                 try {
                     // 1. Отписываемся от слушателей Firebase
                     if (unsubscribeMessages) { unsubscribeMessages(); unsubscribeMessages = null; }
                     if (unsubscribeFriends) { unsubscribeFriends(); unsubscribeFriends = null; }
                     if (unsubscribeRequests) { unsubscribeRequests = null; }
 
-                    // 2. Жестко вычищаем HTML-мясо из интерфейса, чтобы фон остался чистым
-                    friendsListContainer.innerHTML = '';
-                    requestsListContainer.innerHTML = '';
-                    messagesArea.innerHTML = '';
-                    chatTargetName.textContent = 'Выберите, кому хотите написать';
-                    chatTargetStatus.className = 'chat-target-status';
-                    chatTargetStatus.textContent = '';
-
-                    // 3. Выходим из Firebase
+                    // 2. Выходим из Firebase
                     await signOut(auth);
-                    showNotification('Вы вышли из аккаунта', 'success');
+                    
+                    // 3. Перезагружаем страницу для идеальной очистки интерфейса и памяти
+                    window.location.reload();
+                    
                 } catch (err) {
                     console.error('Ошибка при выходе:', err);
                     showNotification(getAuthErrorMessage(err), 'error');
@@ -404,8 +397,9 @@ logoutBtn.addEventListener('click', () => {
             }
         );
     } else {
-        // Если вдруг функция подтверждения не загрузилась, выпускаем по старинке без спроса
-        signOut(auth).catch(console.error);
+        signOut(auth)
+            .then(() => window.location.reload())
+            .catch(console.error);
     }
 });
 
