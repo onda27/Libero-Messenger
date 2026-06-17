@@ -18,8 +18,7 @@ import {
     onSnapshot,
     updateDoc,
     deleteDoc,
-    limit,
-    orderBy
+    limit
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 /* === ЛОКАЛЬНОЕ СОСТОЯНИЕ === */
@@ -965,18 +964,16 @@ function listenToMessages() {
         }
     }
 
-    // ВАЖНО: Добавлена сортировка orderBy('createdAt', 'asc') в оба запроса
+// МЫ УБРАЛИ orderBy. Теперь индексы Firestore больше НЕ ТРЕБУЮТСЯ вообще!
     const sentQuery = query(
         collection(db, 'messages'),
         where('senderUid', '==', currentUser.uid),
-        where('receiverUid', '==', currentChatFriend.uid),
-        orderBy('createdAt', 'asc')
+        where('receiverUid', '==', currentChatFriend.uid)
     );
     const receivedQuery = query(
         collection(db, 'messages'),
         where('senderUid', '==', currentChatFriend.uid),
-        where('receiverUid', '==', currentUser.uid),
-        orderBy('createdAt', 'asc')
+        where('receiverUid', '==', currentUser.uid)
     );
 
     let messagesLoadErrorShown = false;
