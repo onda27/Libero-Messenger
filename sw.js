@@ -1,92 +1,86 @@
 // sw.js
-const CACHE_NAME = 'libero-v53';
-const ASSETS = [
-  './',
-  './index.html',
-  './style.css',
-  './scripts.js',
-  './firebase.js'
-];
+importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
-// Установка SW и кэширование ресурсов
+// Инициализация Firebase внутри Service Worker
+// Данные конфигурации (apiKey, authDomain и т.д.) возьми из своего файла firebase.js
+firebase.initializeApp({
+  apiKey: "ТВОЙ_API_KEY",
+  authDomain: "ТВОЙ_PROJECT.firebaseapp.com",
+  projectId: "ТВОЙ_PROJECT_ID",
+  storageBucket: "ТВОЙ_PROJECT.appspot.com",
+  messagingSenderId: "ТВОЙ_SENDER_ID",
+  appId: "ТВОЙ_APP_ID"
+});
+
+const messaging = firebase.messaging();
+
+// Логика, которая сработает, когда Firebase пришлет фоновый Push, 
+// даже если PWA полностью закрыто на айфоне!
+messaging.onBackgroundMessage((payload) => {
+  console.log('[sw.js] Получено фоновое сообщение: ', payload);
+
+  const notificationTitle = payload.notification?.title || 'Новое сообщение';
+  const notificationOptions = {
+    body: payload.notification?.body || '',
+    icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png', // Твоя иконка
+    tag: payload.data?.senderUid || 'chat-notification',
+    data: {
+      url: self.location.origin
+    }
+  };
+
+  // Жесткое требование iOS: оборачивать в event.waitUntil
+  return self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// --- СТАРЫЙ КОД КЭШИРОВАНИЯ ИЗ ТВОЕГО SW.JS (НЕ УДАЛЯЕМ ЕГО) ---
+const CACHE_NAME = 'libero-v56';
+const ASSETS = ['./', './index.html', './style.css', './scripts.js', './firebase.js'];
+
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Service Worker] Кэширование ресурсов');
-      return cache.addAll(ASSETS);
-    }).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
   );
 });
 
-// Активация SW и удаление старых кэшей
 self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            console.log('[Service Worker] Удаление старого кэша:', key);
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches.keys().then((keys) => Promise.all(keys.map((key) => {
+      if (key !== CACHE_NAME) return caches.delete(key);
+    }))).then(() => self.clients.claim())
   );
 });
 
-// Стратегия: Network First (Сначала сеть, с переходом на кэш при офлайне)
-// Это идеальное решение для GitHub Pages, чтобы пользователи сразу получали свежие обновления,
-// а при отсутствии сети мессенджер продолжал открываться из кэша.
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') {
-    return;
-  }
-
-  // РЕШЕНИЕ ПРОБЛЕМЫ ДВОЙНОГО КЭШИРОВАНИЯ:
-  // Если запрос идет к нашему домену (локальные ресурсы) и это не навигация по страницам,
-  // создаем новый запрос с флагом cache: 'no-cache', чтобы принудительно лететь на сервер мимо HTTP-кэша.
+  if (e.request.method !== 'GET') return;
   let requestToFetch = e.request;
   if (e.request.url.includes(self.location.origin) && e.request.mode !== 'navigate') {
     requestToFetch = new Request(e.request, { cache: 'no-cache' });
   }
-
   e.respondWith(
     fetch(requestToFetch)
       .then((response) => {
         if (response && response.status === 200 && response.type === 'basic') {
           const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(e.request, responseToCache);
-          });
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, responseToCache));
         }
         return response;
       })
-      .catch(() => caches.match(e.request)) // Если интернета нет — берем из SW-кэша
+      .catch(() => caches.match(e.request))
   );
 });
 
-// Обработка клика по уведомлению
 self.addEventListener('notificationclick', (event) => {
-  // 1. Закрываем само уведомление
   event.notification.close();
-
-  // 2. Получаем URL из данных уведомления (или дефолтный)
   const urlToOpen = event.notification.data?.url || '/';
-
-  // 3. Ищем открытую вкладку или открываем новую
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Если вкладка с мессенджером уже где-то открыта (даже свернута) - фокусируемся на ней
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          return client.focus();
-        }
+        if (client.url.includes(self.location.origin) && 'focus' in client) return client.focus();
       }
-      // Если браузер был закрыт вообще - открываем новую вкладку
-      if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
-      }
+      if (clients.openWindow) return clients.openWindow(urlToOpen);
     })
   );
 });

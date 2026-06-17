@@ -849,13 +849,13 @@ async function sendMessage() {
     const text = messageInput.value.trim();
     if (!text || !currentChatFriend) return;
 
-    // Очищаем интерфейс мгновенно
     messageInput.value = '';
     messageInput.style.height = 'inherit';
     micBtn.style.display = 'flex';
     sendBtn.style.display = 'none';
 
     try {
+        // 1. Сначала как обычно сохраняем сообщение в базу данных
         await addDoc(collection(db, 'messages'), {
             senderUid: currentUser.uid,
             receiverUid: currentChatFriend.uid,
@@ -863,6 +863,26 @@ async function sendMessage() {
             createdAt: Date.now(),
             isRead: false 
         });
+
+        // 2. ДОБАВЛЕННЫЙ КОД: Запрашиваем токен получателя из базы данных
+        const friendSnap = await getDoc(doc(db, 'users', currentChatFriend.uid));
+        if (friendSnap.exists()) {
+            const friendData = friendSnap.data();
+            
+            // Если у друга сохранен токен (он зашел с айфона и разрешил уведы)
+            if (friendData.fcmToken) {
+                
+                // Отправляем HTTP-запрос на отправку ДЕКЛАРАТИВНОГО пуша
+                // Используем специальный инструмент Firebase для отправки
+                // Для полноценного FCM v1 нужен серверный ключ, но для теста можно кинуть обычный запрос:
+                console.log("Пытаемся отправить пуш на токен:", friendData.fcmToken);
+                
+                // ВНИМАНИЕ: Для отправки напрямую с клиента без бэкенда на FCM v1,
+                // обычно используют сторонние бесплатные шлюзы или Cloud Functions.
+                // Чтобы не усложнять, этот шаг чаще всего делают через Cloud Functions.
+            }
+        }
+
     } catch (e) {
         console.error("Ошибка отправки сообщения:", e);
         showNotification(getAuthErrorMessage(e), 'error');
@@ -1192,6 +1212,7 @@ function startGlobalNotificationListener() {
                     Notification.requestPermission().then(permission => {
                         if (permission === 'granted') {
                             showNotification('Уведомления успешно включены!', 'success');
+                            saveMessagingToken(); // <--- ВОТ ЭТО ДОБАВИЛИ
                         } else {
                             showNotification('Уведомления отклонены', 'error');
                         }
@@ -1199,6 +1220,9 @@ function startGlobalNotificationListener() {
                 }
             );
         }, 1000);
+    } else if ("Notification" in window && Notification.permission === "granted") {
+        // Если уже разрешено — просто обновляем токен (на случай если он протух)
+        setTimeout(() => { if(currentUser) saveMessagingToken(); }, 2000);
     }
 
     const unreadQuery = query(
@@ -1248,3 +1272,27 @@ document.addEventListener('visibilitychange', () => {
         setOnlineStatus(false);
     }
 });
+
+import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
+
+// Функция для взятия токена и сохранения в базу данных
+async function saveMessagingToken() {
+    try {
+        const messaging = getMessaging();
+        // VAPID KEY берется из Firebase Console -> Settings -> Cloud Messaging -> Web Push certificates
+        const currentToken = await getToken(messaging, { vapidKey: 'BMONcBixweHS1I8O2hHor2CB3l__R-2cfpHw1NSwLt9c_QXqUtpLzZWAu656EH94BHbsTs7NTsVfCjDnct4ysVQ' });
+        
+        if (currentToken && currentUser) {
+            // Сохраняем токен в документ пользователя
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+                fcmToken: currentToken
+            });
+            console.log('FCM Токен успешно сохранен!');
+        }
+    } catch (err) {
+        console.error('Не удалось получить токен уведомлений:', err);
+    }
+}
+
+// Модифицируем твою функцию startGlobalNotificationListener
+// Находим её в твоем коде и внутри, там где Notification.requestPermission(), вызываем сохранение токена:
