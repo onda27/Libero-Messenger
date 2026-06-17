@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'libero-v82';
+const CACHE_NAME = 'libero-v84';
 const ASSETS = [
   './',
   './index.html',
@@ -69,31 +69,39 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
-  try {
+  event.waitUntil((async () => {
     const data = event.data.json();
     
-    // Формируем красивую ссылку. Если senderUid есть, добавляем его в параметры урла
-    const chatUrl = data.senderUid 
-      ? `${self.location.origin}${self.location.pathname}?chatWith=${data.senderUid}`
-      : `${self.location.origin}${self.location.pathname}`;
+    // 1. Получаем список всех открытых вкладок нашего сайта
+    const clientList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     
+    // 2. Проверяем, сфокусирована ли вкладка, где открыт именно этот чат
+    let isChatActive = false;
+    for (const client of clientList) {
+      if (client.focused && client.url.includes(`chatWith=${data.senderUid}`)) {
+        isChatActive = true;
+        break;
+      }
+    }
+
+    // 3. Если чат активен — уведомление не показываем
+    if (isChatActive) return;
+
+    // 4. Если чат не активен — показываем
+    const basePath = self.location.pathname.replace('sw.js', '');
+    const chatUrl = data.senderUid 
+      ? `${self.location.origin}${basePath}?chatWith=${data.senderUid}`
+      : `${self.location.origin}${basePath}`;
+
     const options = {
       body: data.body,
       icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
-      vibrate: [200, 100, 200],
-      tag: data.senderUid || 'general',
-      data: {
-        url: chatUrl, // <-- Передаем точный URL с ID чата внутрь данных уведомления
-        senderUid: data.senderUid
-      }
+      tag: data.senderUid, // тег позволяет группировать уведомления от одного человека
+      data: { url: chatUrl }
     };
 
-    event.waitUntil(
-      self.registration.showNotification(data.title, options)
-    );
-  } catch (err) {
-    console.error('Ошибка обработки Push:', err);
-  }
+    self.registration.showNotification(data.title, options);
+  })());
 });
 
 // Обработка клика по уведомлению

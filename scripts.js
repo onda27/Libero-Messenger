@@ -314,7 +314,7 @@ onAuthStateChanged(auth, async (firebaseUser) => {
                                 window.history.replaceState({}, document.title, window.location.pathname);
                                 
                                 // Открываем чат! (Убедись, что функция openChat доступна или объявлена выше)
-                                openChat(friendObject);
+                                selectFriendChat(friendObject);
                             }
                         } catch (error) {
                             console.error('Ошибка автоматического открытия чата из пуша:', error);
@@ -409,6 +409,7 @@ setupUsernameBtn.addEventListener('click', async () => {
         appContainer.classList.add('active');
         
         startListeningRequestsAndFriends();
+        startGlobalNotificationListener();
 
     } catch (error) {
         console.error('Ошибка сохранения логина:', error);
@@ -429,24 +430,16 @@ logoutBtn.addEventListener('click', () => {
             'Вы уверены, что хотите выйти из мессенджера?',
             async () => {
                 try {
-                    // --- НОВОЕ: Отписываемся от пуш-уведомлений и удаляем токен из БД ---
+                    // но оставляем саму подписку в браузере живой для следующего аккаунта.
                     if (currentUser && currentUser.uid) {
                         try {
-                            if ('serviceWorker' in navigator && 'PushManager' in window) {
-                                const registration = await navigator.serviceWorker.ready;
-                                const subscription = await registration.pushManager.getSubscription();
-                                if (subscription) {
-                                    await subscription.unsubscribe();
-                                }
-                            }
                             await updateDoc(doc(db, 'users', currentUser.uid), {
                                 pushSubscription: deleteField()
                             });
                         } catch (error) {
-                            console.error('Ошибка при удалении push-подписки:', error);
+                            console.error('Ошибка при удалении push-подписки из БД:', error);
                         }
                     }
-                    // ----------------------------------------------------------------------
 
                     // 1. Отписываемся от слушателей Firebase
                     if (unsubscribeMessages) { unsubscribeMessages(); unsubscribeMessages = null; }
@@ -849,6 +842,11 @@ function closeChat() {
 
 function selectFriendChat(friend) {
     currentChatFriend = friend;
+
+    // --- ИСПРАВЛЕНИЕ: Записываем ID чата в адресную строку без перезагрузки ---
+    // Это нужно, чтобы Service Worker понимал, что чат открыт, и не слал пуши
+    window.history.replaceState({}, document.title, `${window.location.pathname}?chatWith=${friend.uid}`);
+    // ------------------------------------------------------------------------
 
     // Скрываем заглушку и показываем чат
     noChatSelectedScreen.style.display = 'none';
