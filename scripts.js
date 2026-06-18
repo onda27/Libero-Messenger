@@ -1,10 +1,11 @@
 // scripts.js
-import { auth, db } from './firebase.js';
+import { auth, db, storage } from './firebase.js';
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
     onAuthStateChanged, 
-    signOut 
+    signOut,
+    updateEmail
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
     collection, 
@@ -21,6 +22,11 @@ import {
     deleteField,
     limit
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import {
+    ref,
+    uploadBytes,
+    getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
 import { supabase } from './supabase.js';
 
@@ -46,6 +52,10 @@ let unsubscribeFriends = null;
 let unsubscribeRequests = null;
 let friendListeners = {};
 let userColorsCache = {};
+let userProfilesCache = {};
+let pendingAttachments = [];
+let profileModalUid = null;
+let messageStore = new Map();
 
 // Предопределенные цвета аватаров
 const avatarsBg = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#0ea5e9", "#6366f1", "#a855f7", "#ec4899"];
@@ -60,6 +70,14 @@ function isValidLogin(login) {
     return LOGIN_REGEX.test(login);
 }
 
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function getUserColor(uid) {
     if (!userColorsCache[uid]) {
         let hash = 0;
@@ -70,6 +88,81 @@ function getUserColor(uid) {
         userColorsCache[uid] = avatarsBg[index];
     }
     return userColorsCache[uid];
+}
+
+function syncActiveChatToSW(uid = null) {
+    if (!('serviceWorker' in navigator)) return;
+    const payload = { type: 'SET_ACTIVE_CHAT', uid: uid || null };
+    if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage(payload);
+    }
+    navigator.serviceWorker.ready.then((registration) => {
+        if (registration.active) {
+            registration.active.postMessage(payload);
+        }
+    }).catch(() => {});
+}
+
+function clearNotificationsBySender(senderUid) {
+    if (!('serviceWorker' in navigator) || !senderUid) return;
+    navigator.serviceWorker.ready.then((registration) => {
+        return registration.getNotifications();
+    }).then((notifications) => {
+        notifications.forEach((notification) => {
+            if (notification.tag === senderUid || notification.data?.senderUid === senderUid) {
+                notification.close();
+            }
+        });
+    }).catch((err) => console.error('Не удалось очистить уведомления:', err));
+}
+
+function applyAvatarToElement(element, user) {
+    if (!element || !user) return;
+    const letter = (user.username || '?').charAt(0).toUpperCase();
+    element.innerHTML = '';
+    if (user.avatarUrl) {
+        const img = document.createElement('img');
+        img.src = user.avatarUrl;
+        img.alt = user.username || '';
+        img.className = 'avatar-img';
+        element.appendChild(img);
+        element.style.background = 'transparent';
+    } else {
+        element.textContent = letter;
+        element.style.background = getUserColor(user.uid);
+    }
+}
+
+function buildAvatarContainerHtml(user) {
+    const letter = (user.username || '?').charAt(0).toUpperCase();
+    if (user.avatarUrl) {
+        return `<img src="${user.avatarUrl}" class="avatar-img" alt="${user.username}">`;
+    }
+    return letter;
+}
+
+async function cacheUserProfile(uid) {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (!snap.exists()) return null;
+    const profile = snap.data();
+    userProfilesCache[uid] = profile;
+    return profile;
+}
+
+async function sendPushToUser(receiverUid, body, senderUid) {
+    const friendDoc = await getDoc(doc(db, 'users', receiverUid));
+    if (!friendDoc.exists()) return;
+    const pushSubStr = friendDoc.data().pushSubscription;
+    if (!pushSubStr) return;
+
+    await supabase.functions.invoke('send-push', {
+        body: {
+            subscription: JSON.parse(pushSubStr),
+            title: currentUser.username,
+            body,
+            senderUid
+        }
+    });
 }
 
 /* === УВЕДОМЛЕНИЯ И ПОДТВЕРЖДЕНИЯ === */
@@ -293,16 +386,7 @@ onAuthStateChanged(auth, async (firebaseUser) => {
                 startListeningRequestsAndFriends();
                 startGlobalNotificationListener();
                 setOnlineStatus(true);
-
-                     // --- НОВОЕ: Автоматическое открытие чата из Push-уведомления ---
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const chatWithUid = urlParams.get('chatWith');
-                    
-                    if (chatWithUid) {
-                        window.pendingChatUid = chatWithUid; // Запоминаем, кого нужно открыть
-                        // Очищаем URL, чтобы не было повторных открытий при F5
-                        window.history.replaceState({}, document.title, window.location.pathname);
-                    }
+                syncActiveChatToSW(null);
             } else {
                 // Новый юзер: прячем вход, включаем шаг 2
                 mainAuthCard.style.display = 'none'; 
@@ -378,13 +462,16 @@ setupUsernameBtn.addEventListener('click', async () => {
         await setDoc(doc(db, 'users', firebaseUser.uid), {
             uid: firebaseUser.uid,
             username: rawLogin,
+            email: firebaseUser.email || '',
+            bio: '',
+            avatarUrl: '',
             createdAt: Date.now()
         });
 
         await setDoc(userRef, { uid: firebaseUser.uid });
 
         // 3. Данные успешно записаны, обновляем UI
-        currentUser = { uid: firebaseUser.uid, username: rawLogin };
+        currentUser = { uid: firebaseUser.uid, username: rawLogin, email: firebaseUser.email || '', bio: '', avatarUrl: '' };
         myProfileName.textContent = currentUser.username;
         
         usernameCard.style.display = 'none'; // Скрываем карточку шага 2
@@ -600,6 +687,10 @@ async function setOnlineStatus(isOnline) {
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         setOnlineStatus(true);
+        syncActiveChatToSW(currentChatFriend?.uid || null);
+        if (currentChatFriend) {
+            clearNotificationsBySender(currentChatFriend.uid);
+        }
     } else {
         setOnlineStatus(false);
     }
@@ -727,24 +818,30 @@ function renderFriendsList(friends) {
     }
 
     friends.forEach(friend => {
+        cacheUserProfile(friend.uid).then((profile) => {
+            if (profile) {
+                friend.avatarUrl = profile.avatarUrl || '';
+                friend.bio = profile.bio || '';
+            }
+        });
+
         const color = getUserColor(friend.uid);
-        const avatarStr = friend.username.charAt(0).toUpperCase();
+        const avatarContent = buildAvatarContainerHtml(friend);
 
         const div = document.createElement('div');
-        // Добавляем ID для удобного поиска при обновлениях
         div.id = `chat-item-${friend.uid}`;
         div.className = `chat-item ${currentChatFriend && currentChatFriend.uid === friend.uid ? 'active' : ''}`;
         div.onclick = () => selectFriendChat(friend);
         
         div.innerHTML = `
             <div class="avatar-container">
-                <div class="avatar" style="background:${color}">${avatarStr}</div>
-                <div class="online-dot" id="dot-${friend.uid}"></div> <!-- Убрали active по умолчанию -->
+                <div class="avatar" id="list-avatar-${friend.uid}" style="background:${friend.avatarUrl ? 'transparent' : color}">${avatarContent}</div>
+                <div class="online-dot" id="dot-${friend.uid}"></div>
             </div>
             <div class="chat-info">
                 <div class="chat-row-1">
                     <div class="chat-name">${friend.username}</div>
-                    <div id="badge-container-${friend.uid}"></div> <!-- Контейнер для счетчика -->
+                    <div id="badge-container-${friend.uid}"></div>
                 </div>
                 <div class="chat-row-2">
                     <div class="chat-last-msg" id="last-msg-${friend.uid}">Нажмите для общения</div>
@@ -753,21 +850,16 @@ function renderFriendsList(friends) {
         `;
         chatList.appendChild(div);
 
-        // Запускаем слушатели сообщений и статуса
         listenLastMessage(friend.uid);
+    });
 
-        // ДОБАВИТЬ В КОНЕЦ ФУНКЦИИ:
     if (window.pendingChatUid) {
         const targetFriend = friends.find(f => f.uid === window.pendingChatUid);
         if (targetFriend) {
             selectFriendChat(targetFriend);
-        } else {
-            // Если пользователя нет в друзьях, но мы пытаемся открыть с ним чат
-            console.warn('Попытка открыть чат с пользователем не из списка друзей');
         }
-        window.pendingChatUid = null; // Сбрасываем после открытия
+        window.pendingChatUid = null;
     }
-    });
 }
 
 function listenLastMessage(friendUid) {
@@ -798,11 +890,16 @@ function listenLastMessage(friendUid) {
     // 2. Слушаем честный онлайн статус друга
     const unsubOnline = onSnapshot(doc(db, 'users', friendUid), (docSnap) => {
         if(docSnap.exists()){
-            const isOnline = docSnap.data().isOnline;
+            const userData = docSnap.data();
+            userProfilesCache[friendUid] = userData;
+            const isOnline = userData.isOnline;
             const dot = document.getElementById(`dot-${friendUid}`);
             if(dot) {
-                // Если онлайн - вешаем active (зеленый), если нет - убираем (будет серый)
                 dot.className = `online-dot ${isOnline ? 'active' : ''}`;
+            }
+            const listAvatar = document.getElementById(`list-avatar-${friendUid}`);
+            if (listAvatar) {
+                applyAvatarToElement(listAvatar, userData);
             }
         }
     });
@@ -827,76 +924,75 @@ const activeStatus = document.getElementById('activeStatus');
 const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const micBtn = document.getElementById('micBtn');
+const attachBtn = document.getElementById('attachBtn');
+const attachInput = document.getElementById('attachInput');
+const attachPreview = document.getElementById('attachPreview');
+const themeToggleBtn = document.getElementById('themeToggleBtn');
+const backBtnMobile = document.getElementById('backBtnMobile');
+const headerUser = document.querySelector('.header-user');
+const profileModal = document.getElementById('profileModal');
+const profileCloseBtn = document.getElementById('profileCloseBtn');
+const profileAvatarLetter = document.getElementById('profileAvatarLetter');
+const profileAvatarImg = document.getElementById('profileAvatarImg');
+const profileAvatarEdit = document.getElementById('profileAvatarEdit');
+const profileAvatarInput = document.getElementById('profileAvatarInput');
+const profileUsername = document.getElementById('profileUsername');
+const profileStatusText = document.getElementById('profileStatusText');
+const profileEmail = document.getElementById('profileEmail');
+const profileBio = document.getElementById('profileBio');
+const profileSaveBtn = document.getElementById('profileSaveBtn');
+const profileRemoveFriendBtn = document.getElementById('profileRemoveFriendBtn');
+const infoBio = document.getElementById('infoBio');
+const infoOpenProfileBtn = document.getElementById('infoOpenProfileBtn');
+const infoRemoveFriendBtn = document.getElementById('infoRemoveFriendBtn');
 
 function closeChat() {
-    // Сбрасываем активный чат в Service Worker'е
-    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'SET_ACTIVE_CHAT', uid: null });
-    }
+    syncActiveChatToSW(null);
     currentChatFriend = null;
+    clearPendingAttachments();
     noChatSelectedScreen.style.display = 'flex';
     chatHeader.style.display = 'none';
     messagesArea.style.display = 'none';
     chatInputArea.style.display = 'none';
+    if (attachPreview) attachPreview.style.display = 'none';
     if (unsubscribeMessages) unsubscribeMessages();
-
-    // НОВОЕ: Очищаем URL, чтобы Service Worker знал, что мы вышли из чата
-    window.history.pushState({}, '', window.location.pathname);
+    messageStore.clear();
 }
 
 function selectFriendChat(friend) {
-    // Сообщаем Service Worker'у, кто сейчас открыт
-    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'SET_ACTIVE_CHAT', uid: friend.uid });
-    }
+    syncActiveChatToSW(friend.uid);
+    clearNotificationsBySender(friend.uid);
     currentChatFriend = friend;
 
-        // 1. МЕНЯЕМ URL БЕЗ ПЕРЕЗАГРУЗКИ СТРАНИЦЫ
-        // Это нужно, чтобы Service Worker увидел в ссылке, с кем мы общаемся
-        const newUrl = window.location.origin + window.location.pathname + `?chatWith=${currentChatFriend.uid}`;
-        window.history.pushState({ path: newUrl }, '', newUrl);
-
-        // 2. СМАХИВАЕМ УВЕДОМЛЕНИЯ ЭТОГО ЮЗЕРА
-        // (У тебя там была функция clearNotificationsBySender, вот так она должна работать под капотом):
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.ready.then(reg => {
-                reg.getNotifications({ tag: currentChatFriend.uid }).then(notifications => {
-                    notifications.forEach(notification => notification.close());
-                });
-            });
-        }
-
-    // Скрываем заглушку и показываем чат
     noChatSelectedScreen.style.display = 'none';
     chatHeader.style.display = 'flex';
     messagesArea.style.display = 'flex';
     chatInputArea.style.display = 'flex';
 
-    // Заполняем базовые данные шапки
     activeName.textContent = friend.username;
-    activeAvatar.textContent = friend.username.charAt(0).toUpperCase();
-    activeAvatar.style.background = getUserColor(friend.uid);
+    applyAvatarToElement(activeAvatar, friend);
 
-    // Подписываемся на статус друга в реальном времени для шапки
     if (window.unsubscribeActiveStatus) window.unsubscribeActiveStatus();
     window.unsubscribeActiveStatus = onSnapshot(doc(db, 'users', friend.uid), (docSnap) => {
         if (docSnap.exists()) {
-            const isOnline = docSnap.data().isOnline;
+            const userData = docSnap.data();
+            userProfilesCache[friend.uid] = userData;
+            currentChatFriend = { ...currentChatFriend, ...userData };
+            const isOnline = userData.isOnline;
             activeStatus.textContent = isOnline ? 'в сети' : 'не в сети';
             activeStatus.style.color = isOnline ? 'var(--primary)' : 'var(--text-muted)';
             document.getElementById('activeOnline').className = `online-dot ${isOnline ? 'active' : ''}`;
+            applyAvatarToElement(activeAvatar, userData);
+            if (infoBio) infoBio.textContent = userData.bio || '—';
         }
     });
 
-    // Обновляем активный класс в списке друзей
     document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
     const currentChatItem = document.getElementById(`chat-item-${friend.uid}`);
     if (currentChatItem) currentChatItem.classList.add('active');
     
-    // Подписываемся на сообщения
     listenToMessages();
 
-    // Мобильный вид - скрываем сайдбар
     if (window.innerWidth <= 768) {
         document.getElementById('sidebar').classList.add('hidden-mobile');
     }
@@ -905,8 +1001,7 @@ function selectFriendChat(friend) {
 // Слушатель инпута ввода
 messageInput.addEventListener('input', () => {
     autoExpand(messageInput);
-    micBtn.style.display = messageInput.value.trim() ? 'none' : 'flex';
-    sendBtn.style.display = messageInput.value.trim() ? 'flex' : 'none';
+    updateSendButtonVisibility();
 });
 
 messageInput.addEventListener('keypress', (e) => {
@@ -925,7 +1020,14 @@ function autoExpand(field) {
 
 async function sendMessage() {
     const text = messageInput.value.trim();
-    if (!text || !currentChatFriend) return;
+    if (!currentChatFriend) return;
+
+    if (pendingAttachments.length > 0) {
+        await sendPendingAttachments(text);
+        return;
+    }
+
+    if (!text) return;
 
     messageInput.value = '';
     messageInput.style.height = 'inherit';
@@ -933,155 +1035,190 @@ async function sendMessage() {
     sendBtn.style.display = 'none';
 
     try {
-        // 1. Сохраняем сообщение в Firebase (Твой текущий код)
         await addDoc(collection(db, 'messages'), {
             senderUid: currentUser.uid,
             receiverUid: currentChatFriend.uid,
-            text: text,
+            type: 'text',
+            text,
             createdAt: Date.now(),
-            isRead: false 
+            isRead: false
         });
-
-        // 2. ДОБАВЛЕНО: Отправляем Push через Supabase Edge Function
-        // Получаем профиль друга из Firestore, чтобы достать его токен подписки
-        const friendDoc = await getDoc(doc(db, 'users', currentChatFriend.uid));
-        if (friendDoc.exists()) {
-            const pushSubStr = friendDoc.data().pushSubscription;
-            
-            // Если друг разрешил уведомления, дергаем функцию
-            if (pushSubStr) {
-                const subscriptionObject = JSON.parse(pushSubStr);
-                
-            await supabase.functions.invoke('send-push', {
-                body: {
-                    subscription: subscriptionObject,
-                    title: currentUser.username, 
-                    body: text,
-                    senderUid: currentUser.uid // <-- НОВОЕ: Передаем ID отправителя
-                }
-            });
-            }
-        }
-
+        await sendPushToUser(currentChatFriend.uid, text, currentUser.uid);
     } catch (e) {
         console.error("Ошибка отправки сообщения:", e);
         showNotification(getAuthErrorMessage(e), 'error');
     }
 }
 
-function listenToMessages() {
-    if (unsubscribeMessages) unsubscribeMessages();
+function renderAttachmentPreview() {
+    if (!attachPreview) return;
+    attachPreview.innerHTML = '';
+    if (pendingAttachments.length === 0) {
+        attachPreview.style.display = 'none';
+        return;
+    }
+    attachPreview.style.display = 'flex';
+    pendingAttachments.forEach((item, index) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'attach-preview-item';
+        wrap.innerHTML = `<img src="${item.previewUrl}" alt=""><button type="button" data-index="${index}">×</button>`;
+        wrap.querySelector('button').onclick = () => {
+            URL.revokeObjectURL(item.previewUrl);
+            pendingAttachments.splice(index, 1);
+            renderAttachmentPreview();
+            updateSendButtonVisibility();
+        };
+        attachPreview.appendChild(wrap);
+    });
+}
 
-    // Очищаем контейнер один раз ПРИ СМЕНЕ чата
-    messagesArea.innerHTML = ''; 
-    ensureTypingIndicator();
+function clearPendingAttachments() {
+    pendingAttachments.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    pendingAttachments = [];
+    renderAttachmentPreview();
+    if (attachInput) attachInput.value = '';
+    updateSendButtonVisibility();
+}
 
-    // Вспомогательная функция для генерации ID даты
-    const getDateId = (timestamp) => {
-        return 'date-' + new Date(timestamp).toLocaleDateString('ru-RU').replace(/\./g, '-');
-    };
+function updateSendButtonVisibility() {
+    const hasContent = messageInput.value.trim() || pendingAttachments.length > 0;
+    micBtn.style.display = hasContent ? 'none' : 'flex';
+    sendBtn.style.display = hasContent ? 'flex' : 'none';
+}
 
-    // Функция для правильной вставки элемента по хронологии (timestamp)
-    function insertMessageInOrder(newMsgNode, timestamp) {
-        const typingIndicator = document.getElementById('typingIndicator');
-        const existingMessages = Array.from(messagesArea.querySelectorAll('.message'));
-        
-        const nextMessage = existingMessages.find(msgNode => {
-            const msgTime = parseInt(msgNode.getAttribute('data-timestamp'), 10);
-            return msgTime > timestamp;
-        });
+async function sendPendingAttachments(caption = '') {
+    if (!currentChatFriend || pendingAttachments.length === 0) return;
+    const files = [...pendingAttachments];
+    clearPendingAttachments();
+    messageInput.value = '';
+    messageInput.style.height = 'inherit';
 
-        if (nextMessage) {
-            messagesArea.insertBefore(newMsgNode, nextMessage);
-        } else {
-            messagesArea.insertBefore(newMsgNode, typingIndicator);
+    for (const item of files) {
+        try {
+            const path = `chat/${currentUser.uid}/${Date.now()}_${item.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const storageRef = ref(storage, path);
+            await uploadBytes(storageRef, item.file);
+            const imageUrl = await getDownloadURL(storageRef);
+            await addDoc(collection(db, 'messages'), {
+                senderUid: currentUser.uid,
+                receiverUid: currentChatFriend.uid,
+                type: 'image',
+                imageUrl,
+                text: caption || '',
+                createdAt: Date.now(),
+                isRead: false
+            });
+            await sendPushToUser(currentChatFriend.uid, caption || '📷 Фото', currentUser.uid);
+        } catch (e) {
+            console.error('Ошибка отправки фото:', e);
+            showNotification('Не удалось отправить фото.', 'error');
         }
     }
+    updateSendButtonVisibility();
+}
 
-    function applySnapshot(snapshot) {
-        const unreadIds = []; // <--- Создаем массив для сбора ID непрочитанных сообщений
+if (attachBtn && attachInput) {
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', () => {
+        const files = Array.from(attachInput.files || []);
+        files.forEach((file) => {
+            if (!file.type.startsWith('image/')) return;
+            pendingAttachments.push({ file, previewUrl: URL.createObjectURL(file) });
+        });
+        attachInput.value = '';
+        renderAttachmentPreview();
+        updateSendButtonVisibility();
+    });
+}
 
-        snapshot.docChanges().forEach((change) => {
-            const msg = change.doc.data();
-            msg.id = change.doc.id;
+function listenToMessages() {
+    if (unsubscribeMessages) unsubscribeMessages();
+    messagesArea.innerHTML = '';
+    messageStore.clear();
+    ensureTypingIndicator();
+
+    const getDateId = (timestamp) => 'date-' + new Date(timestamp).toLocaleDateString('ru-RU').replace(/\./g, '-');
+
+    function buildMessageNode(msg) {
+        const msgTimestamp = msg.createdAt || Date.now();
+        const date = new Date(msgTimestamp);
+        const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        const isMyMessage = msg.senderUid === currentUser.uid;
+        const divMsg = document.createElement('div');
+        divMsg.id = `msg-${msg.id}`;
+        divMsg.setAttribute('data-timestamp', msgTimestamp);
+        divMsg.className = `message ${isMyMessage ? 'msg-out' : 'msg-in'}`;
+
+        const tickIcon = msg.isRead ? '#icon-check-double' : '#icon-check';
+        const tickClass = msg.isRead ? 'msg-status read' : 'msg-status';
+        const imagePart = msg.type === 'image' && msg.imageUrl
+            ? `<img src="${msg.imageUrl}" class="msg-attachment" alt="Фото">`
+            : '';
+        const textPart = msg.text ? `<div>${escapeHtml(msg.text)}</div>` : '';
+
+        divMsg.innerHTML = `
+            <div class="msg-bubble">
+                ${imagePart}
+                ${textPart}
+                <div class="msg-meta">
+                    <span>${timeString}</span>
+                    ${isMyMessage ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
+                </div>
+            </div>
+        `;
+        return divMsg;
+    }
+
+    function rebuildMessagesUI() {
+        const typingIndicator = ensureTypingIndicator();
+        messagesArea.querySelectorAll('.message, .date-divider').forEach((node) => node.remove());
+
+        const sorted = Array.from(messageStore.values()).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        let lastDateId = null;
+        const unreadIds = [];
+
+        sorted.forEach((msg) => {
             const msgTimestamp = msg.createdAt || Date.now();
-
-            // 1. ЕСЛИ СООБЩЕНИЕ ДОБАВЛЕНО
-            if (change.type === 'added') {
-                const date = new Date(msgTimestamp);
-                const dateString = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-                const dateId = getDateId(msgTimestamp);
-
-                if (!document.getElementById(dateId)) {
-                    const divDivider = document.createElement('div');
-                    divDivider.className = 'date-divider';
-                    divDivider.id = dateId;
-                    divDivider.innerHTML = `<span>${dateString}</span>`;
-                    messagesArea.insertBefore(divDivider, document.getElementById('typingIndicator'));
-                }
-
-                const timeString = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-                const isMyMessage = msg.senderUid === currentUser.uid;
-                
-                const divMsg = document.createElement('div');
-                divMsg.id = `msg-${msg.id}`;
-                divMsg.setAttribute('data-timestamp', msgTimestamp); 
-                divMsg.className = `message ${isMyMessage ? 'msg-out' : 'msg-in'}`;
-                
-                const tickIcon = msg.isRead ? '#icon-check-double' : '#icon-check';
-                const tickClass = msg.isRead ? 'msg-status read' : 'msg-status';
-                
-                divMsg.innerHTML = `
-                    <div class="msg-bubble">
-                        ${msg.text}
-                        <div class="msg-meta">
-                            <span>${timeString}</span>
-                            ${isMyMessage ? `<span class="${tickClass}"><svg><use href="${tickIcon}"></use></svg></span>` : ''}
-                        </div>
-                    </div>
-                `;
-                
-                insertMessageInOrder(divMsg, msgTimestamp);
-
-                // ВЛЕПИЛИ СЮДА: Если сообщение пришло от собеседника и оно не прочитано — добавляем в список
-                if (!isMyMessage && !msg.isRead) {
-                    unreadIds.push(msg.id);
-                }
+            const dateId = getDateId(msgTimestamp);
+            if (dateId !== lastDateId) {
+                lastDateId = dateId;
+                const dateString = new Date(msgTimestamp).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+                const divDivider = document.createElement('div');
+                divDivider.className = 'date-divider';
+                divDivider.id = dateId;
+                divDivider.innerHTML = `<span>${dateString}</span>`;
+                messagesArea.insertBefore(divDivider, typingIndicator);
             }
 
-            // 2. ЕСЛИ СООБЩЕНИЕ ИЗМЕНИЛОСЬ (статус прочтения)
-            if (change.type === 'modified') {
-                const msgNode = document.getElementById(`msg-${msg.id}`);
-                if (msgNode && msg.senderUid === currentUser.uid) {
-                    const statusSpan = msgNode.querySelector('.msg-status');
-                    if (statusSpan) {
-                        statusSpan.className = msg.isRead ? 'msg-status read' : 'msg-status';
-                        statusSpan.querySelector('use').setAttribute('href', msg.isRead ? '#icon-check-double' : '#icon-check');
-                    }
-                }
-            }
+            messagesArea.insertBefore(buildMessageNode(msg), typingIndicator);
 
-            // 3. ЕСЛИ СООБЩЕНИЕ УДАЛЕНО
-            if (change.type === 'removed') {
-                const msgNode = document.getElementById(`msg-${msg.id}`);
-                if (msgNode) msgNode.remove();
+            if (msg.senderUid !== currentUser.uid && !msg.isRead) {
+                unreadIds.push(msg.id);
             }
         });
 
         scrollToBottom();
 
-        // Если в открытом чате есть новые непрочитанные сообщения
         if (unreadIds.length > 0) {
-            // Помечаем их прочитанными в Firebase
-            unreadIds.forEach(id => {
+            unreadIds.forEach((id) => {
                 updateDoc(doc(db, 'messages', id), { isRead: true }).catch(console.error);
             });
-            
-            // Очищаем пуши в шторке iOS ТОЛЬКО от этого конкретного пользователя
             if (currentChatFriend) {
                 clearNotificationsBySender(currentChatFriend.uid);
             }
         }
+    }
+
+    function applySnapshot(snapshot) {
+        snapshot.docChanges().forEach((change) => {
+            const msg = { ...change.doc.data(), id: change.doc.id };
+            if (change.type === 'removed') {
+                messageStore.delete(msg.id);
+            } else {
+                messageStore.set(msg.id, msg);
+            }
+        });
+        rebuildMessagesUI();
     }
 
     function ensureTypingIndicator() {
@@ -1093,6 +1230,7 @@ function listenToMessages() {
             typingIndicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
             messagesArea.appendChild(typingIndicator);
         }
+        return typingIndicator;
     }
 
     const sentQuery = query(
@@ -1120,6 +1258,7 @@ function listenToMessages() {
     unsubscribeMessages = () => {
         unsubSent();
         unsubReceived();
+        messageStore.clear();
     };
 }
 
@@ -1185,12 +1324,187 @@ infoToggleBtn.addEventListener('click', (e) => {
     
     if (currentChatFriend) {
         document.getElementById('infoName').textContent = currentChatFriend.username;
-        document.getElementById('infoAvatar').textContent = currentChatFriend.username.charAt(0).toUpperCase();
-        document.getElementById('infoAvatar').style.background = getUserColor(currentChatFriend.uid);
-        document.getElementById('infoStatus').textContent = 'В сети';
+        applyAvatarToElement(document.getElementById('infoAvatar'), currentChatFriend);
+        document.getElementById('infoStatus').textContent = currentChatFriend.isOnline ? 'В сети' : 'Не в сети';
+        if (infoBio) infoBio.textContent = currentChatFriend.bio || '—';
+        if (infoRemoveFriendBtn) infoRemoveFriendBtn.style.display = 'block';
     }
     
     panel.classList.toggle('open');
+});
+
+if (headerUser) {
+    headerUser.addEventListener('click', () => {
+        if (currentChatFriend) openProfile(currentChatFriend.uid);
+    });
+}
+
+if (myProfileName) {
+    myProfileName.addEventListener('click', () => {
+        if (currentUser) openProfile(currentUser.uid);
+    });
+}
+
+if (infoOpenProfileBtn) {
+    infoOpenProfileBtn.addEventListener('click', () => {
+        if (currentChatFriend) openProfile(currentChatFriend.uid);
+    });
+}
+
+if (infoRemoveFriendBtn) {
+    infoRemoveFriendBtn.addEventListener('click', () => {
+        if (currentChatFriend) confirmRemoveFriend(currentChatFriend);
+    });
+}
+
+async function findFriendRequestId(friendUid) {
+    const sentQ = query(
+        collection(db, 'friend_requests'),
+        where('senderUid', '==', currentUser.uid),
+        where('receiverUid', '==', friendUid),
+        where('status', '==', 'accepted')
+    );
+    const receivedQ = query(
+        collection(db, 'friend_requests'),
+        where('senderUid', '==', friendUid),
+        where('receiverUid', '==', currentUser.uid),
+        where('status', '==', 'accepted')
+    );
+    const [sentSnap, receivedSnap] = await Promise.all([getDocs(sentQ), getDocs(receivedQ)]);
+    if (!sentSnap.empty) return sentSnap.docs[0].id;
+    if (!receivedSnap.empty) return receivedSnap.docs[0].id;
+    return null;
+}
+
+async function removeFriend(friendUid) {
+    const reqId = await findFriendRequestId(friendUid);
+    if (!reqId) {
+        showNotification('Не удалось найти связь с пользователем.', 'error');
+        return;
+    }
+    await deleteDoc(doc(db, 'friend_requests', reqId));
+    if (currentChatFriend && currentChatFriend.uid === friendUid) {
+        closeChat();
+        document.getElementById('infoPanel')?.classList.remove('open');
+    }
+    closeProfileModal();
+    showNotification('Пользователь удалён из друзей.', 'success');
+}
+
+function confirmRemoveFriend(friend) {
+    showCustomConfirm(
+        'Удалить из друзей',
+        `Удалить ${friend.username} из списка друзей?`,
+        () => removeFriend(friend.uid)
+    );
+}
+
+function closeProfileModal() {
+    profileModal?.classList.remove('active');
+    profileModalUid = null;
+}
+
+async function openProfile(uid) {
+    if (!uid) return;
+    const profile = userProfilesCache[uid] || await cacheUserProfile(uid);
+    if (!profile) {
+        showNotification('Профиль не найден.', 'error');
+        return;
+    }
+
+    profileModalUid = uid;
+    const isOwnProfile = uid === currentUser.uid;
+    const isFriend = uid !== currentUser.uid;
+
+    profileUsername.textContent = profile.username;
+    profileStatusText.textContent = profile.isOnline ? 'в сети' : 'не в сети';
+    profileEmail.value = profile.email || auth.currentUser?.email || '';
+    profileBio.value = profile.bio || '';
+
+    if (profile.avatarUrl) {
+        profileAvatarImg.src = profile.avatarUrl;
+        profileAvatarImg.style.display = 'block';
+        profileAvatarLetter.style.display = 'none';
+    } else {
+        profileAvatarImg.style.display = 'none';
+        profileAvatarLetter.style.display = 'flex';
+        applyAvatarToElement(profileAvatarLetter, profile);
+    }
+
+    profileEmail.readOnly = !isOwnProfile;
+    profileBio.readOnly = !isOwnProfile;
+    profileSaveBtn.style.display = isOwnProfile ? 'block' : 'none';
+    profileAvatarEdit.style.display = isOwnProfile ? 'flex' : 'none';
+    profileRemoveFriendBtn.style.display = isFriend ? 'block' : 'none';
+
+    profileModal.classList.add('active');
+}
+
+profileCloseBtn?.addEventListener('click', closeProfileModal);
+profileModal?.addEventListener('click', (e) => {
+    if (e.target === profileModal) closeProfileModal();
+});
+
+profileSaveBtn?.addEventListener('click', async () => {
+    if (!currentUser || profileModalUid !== currentUser.uid) return;
+    profileSaveBtn.disabled = true;
+    profileSaveBtn.textContent = 'Сохранение...';
+
+    try {
+        const nextEmail = profileEmail.value.trim();
+        const nextBio = profileBio.value.trim().slice(0, 280);
+
+        if (nextEmail && auth.currentUser && nextEmail !== auth.currentUser.email) {
+            await updateEmail(auth.currentUser, nextEmail);
+        }
+
+        await updateDoc(doc(db, 'users', currentUser.uid), {
+            email: nextEmail,
+            bio: nextBio
+        });
+
+        currentUser = { ...currentUser, email: nextEmail, bio: nextBio };
+        userProfilesCache[currentUser.uid] = { ...currentUser };
+        myProfileName.textContent = currentUser.username;
+        showNotification('Профиль сохранён.', 'success');
+        closeProfileModal();
+    } catch (error) {
+        console.error('Ошибка сохранения профиля:', error);
+        showNotification(getAuthErrorMessage(error), 'error');
+    } finally {
+        profileSaveBtn.disabled = false;
+        profileSaveBtn.textContent = 'Сохранить';
+    }
+});
+
+profileAvatarInput?.addEventListener('change', async () => {
+    const file = profileAvatarInput.files?.[0];
+    profileAvatarInput.value = '';
+    if (!file || !currentUser || profileModalUid !== currentUser.uid) return;
+    if (!file.type.startsWith('image/')) {
+        showNotification('Можно загрузить только изображение.', 'error');
+        return;
+    }
+
+    try {
+        const path = `avatars/${currentUser.uid}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, file);
+        const avatarUrl = await getDownloadURL(storageRef);
+        await updateDoc(doc(db, 'users', currentUser.uid), { avatarUrl });
+        currentUser = { ...currentUser, avatarUrl };
+        userProfilesCache[currentUser.uid] = { ...currentUser };
+        openProfile(currentUser.uid);
+        showNotification('Аватар обновлён.', 'success');
+    } catch (error) {
+        console.error('Ошибка загрузки аватара:', error);
+        showNotification('Не удалось загрузить аватар.', 'error');
+    }
+});
+
+profileRemoveFriendBtn?.addEventListener('click', () => {
+    if (!profileModalUid || profileModalUid === currentUser.uid) return;
+    confirmRemoveFriend({ uid: profileModalUid, username: profileUsername.textContent });
 });
 
 /* === СИСТЕМА ЗВОНКОВ === */
@@ -1248,20 +1562,7 @@ function endCall() {
     videoCallFS.classList.remove('active');
 }
 
-// Функция очистки уведомлений КОНКРЕТНОГО пользователя
-function clearNotificationsBySender(senderUid) {
-    if ('serviceWorker' in navigator && 'Notification' in window) {
-        navigator.serviceWorker.ready.then((registration) => {
-            registration.getNotifications().then((notifications) => {
-                notifications.forEach((notification) => {
-                    if (notification.tag === senderUid || (notification.data && notification.data.senderUid === senderUid)) {
-                        notification.close();
-                    }
-                });
-            });
-        }).catch(err => console.error('Не удалось очистить уведомления:', err));
-    }
-}
+// Функция очистки уведомлений КОНКРЕТНОГО пользователя — см. clearNotificationsBySender выше
 
 // Глобальный слушатель новых сообщений
 // ВСТАВЬ СЮДА СВОЙ ПУБЛИЧНЫЙ КЛЮЧ ИЗ ШАГА 1
@@ -1310,20 +1611,6 @@ async function startGlobalNotificationListener() {
     });
 }
 
-// Умный обработчик возвращения пользователя на вкладку
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        // Проставляем онлайн
-        setOnlineStatus(true);
-        // Очищаем уведомления ТОЛЬКО того друга, чей чат сейчас открыт
-        if (currentChatFriend) {
-            clearNotificationsBySender(currentChatFriend.uid);
-        }
-    } else {
-        setOnlineStatus(false);
-    }
-});
-// Создаем надежную функцию открытия чата из любого состояния
 window.forceOpenChat = async (uid) => {
     // Защита от пустых вызовов
     if (!uid) return;
@@ -1340,8 +1627,10 @@ window.forceOpenChat = async (uid) => {
         if (friendSnap.exists()) {
             const data = friendSnap.data();
             selectFriendChat({ 
-                uid: uid, 
-                username: data.username
+                uid,
+                username: data.username,
+                avatarUrl: data.avatarUrl || '',
+                bio: data.bio || ''
             });
         }
     } catch (error) {

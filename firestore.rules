@@ -1,6 +1,4 @@
 rules_version = '2';
-// Вставь эти правила в Firebase Console:
-// Firestore Database → Rules → Publish
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -16,6 +14,21 @@ service cloud.firestore {
       return name.matches('^[a-z0-9]{3,20}$');
     }
 
+    function validTextMessage() {
+      return request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 4000
+        && (!('type' in request.resource.data) || request.resource.data.type == 'text');
+    }
+
+    function validImageMessage() {
+      return request.resource.data.type == 'image'
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.size() > 0
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 500;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isOwner(userId)
@@ -26,7 +39,6 @@ service cloud.firestore {
     }
 
     match /users_by_username/{username} {
-      // Проверка занятости логина при регистрации
       allow read: if true;
       allow create: if isSignedIn()
         && validUsername(username)
@@ -61,11 +73,9 @@ service cloud.firestore {
         && request.resource.data.senderUid == request.auth.uid
         && request.resource.data.receiverUid is string
         && request.resource.data.receiverUid != request.auth.uid
-        && request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 4000
-        && request.resource.data.createdAt is number;
-      // ЗАМЕНИТЬ ЭТУ СТРОКУ:
+        && request.resource.data.createdAt is number
+        && request.resource.data.isRead == false
+        && (validTextMessage() || validImageMessage());
       allow update: if isSignedIn() && resource.data.receiverUid == request.auth.uid;
       allow delete: if false;
     }

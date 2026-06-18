@@ -336,8 +336,40 @@ ul { list-style: none; }
     fill: #ffffff;
 }
 
-.msg-attachment { border-radius: 10px; max-width: 100%; margin-top: 8px; cursor: pointer; transition: transform 0.2s;}
+.msg-attachment { border-radius: 10px; max-width: 240px; max-height: 320px; width: 100%; margin-top: 4px; cursor: pointer; transition: transform 0.2s; object-fit: cover; display: block; }
 .msg-attachment:hover { transform: scale(1.02); }
+
+.attach-preview {
+    display: flex;
+    gap: 8px;
+    padding: 10px 25px 0;
+    overflow-x: auto;
+}
+.attach-preview-item {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;
+}
+.attach-preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+}
+.attach-preview-item button {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--danger);
+    color: white;
+    font-size: 14px;
+    line-height: 1;
+}
 
 /* ВВОД СООБЩЕНИЙ */
 .chat-input-area {
@@ -700,6 +732,124 @@ body.auth-loading .preloader {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+.profile-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(8px);
+    z-index: 10001;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    padding: 20px;
+}
+.profile-modal-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+}
+.profile-modal-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    padding: 28px 24px 24px;
+    width: 420px;
+    max-width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: var(--panel-shadow);
+}
+.profile-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--text-muted);
+}
+.profile-close:hover { background: var(--glass-hover); color: var(--text-main); }
+.profile-avatar-wrap {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 16px;
+}
+.profile-avatar-img,
+.profile-avatar-letter {
+    width: 120px !important;
+    height: 120px !important;
+    font-size: 42px !important;
+}
+.profile-avatar-edit {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 2px solid var(--bg-body);
+}
+.profile-modal-card h2 {
+    text-align: center;
+    margin-bottom: 6px;
+}
+.profile-status {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 18px;
+}
+.profile-field {
+    margin-bottom: 14px;
+    text-align: left;
+}
+.profile-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.profile-bio { min-height: 90px; resize: vertical; }
+.profile-link-btn,
+.profile-danger-btn {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 8px;
+}
+.profile-link-btn {
+    background: var(--primary);
+    color: white;
+}
+.profile-link-btn:hover { background: var(--primary-hover); }
+.profile-danger-btn {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.profile-danger-btn:hover { background: rgba(239, 68, 68, 0.25); }
+.avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
 }
 
 /* === СТИЛИ ДЛЯ ПРЕЛОАДЕРА === */

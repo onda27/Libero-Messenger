@@ -1,14 +1,15 @@
 // sw.js
-const CACHE_NAME = 'libero-v101';
+const CACHE_NAME = 'libero-v105';
 const ASSETS = [
   './',
   './index.html',
-  './style.css',
-  './scripts.js',
+  './style.css?v=102',
+  './scripts.js?v=102',
   './firebase.js'
 ];
 
-// Установка SW и кэширование ресурсов
+let activeChatUid = null;
+
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -18,7 +19,6 @@ self.addEventListener('install', (e) => {
   );
 });
 
-// Активация SW и удаление старых кэшей
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) => {
@@ -34,17 +34,11 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Стратегия: Network First (Сначала сеть, с переходом на кэш при офлайне)
-// Это идеальное решение для GitHub Pages, чтобы пользователи сразу получали свежие обновления,
-// а при отсутствии сети мессенджер продолжал открываться из кэша.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') {
     return;
   }
 
-  // РЕШЕНИЕ ПРОБЛЕМЫ ДВОЙНОГО КЭШИРОВАНИЯ:
-  // Если запрос идет к нашему домену (локальные ресурсы) и это не навигация по страницам,
-  // создаем новый запрос с флагом cache: 'no-cache', чтобы принудительно лететь на сервер мимо HTTP-кэша.
   let requestToFetch = e.request;
   if (e.request.url.includes(self.location.origin) && e.request.mode !== 'navigate') {
     requestToFetch = new Request(e.request, { cache: 'no-cache' });
@@ -61,87 +55,84 @@ self.addEventListener('fetch', (e) => {
         }
         return response;
       })
-      .catch(() => caches.match(e.request)) // Если интернета нет — берем из SW-кэша
+      .catch(() => caches.match(e.request))
   );
 });
 
-// В sw.js
-
-// Переменная для хранения ID текущего открытого чата
-let activeChatUid = null;
-
-// Слушаем сообщения от нашего приложения (когда пользователь открывает/закрывает чат)
 self.addEventListener('message', (event) => {
-    if (event.data && event.data.type === 'SET_ACTIVE_CHAT') {
-        activeChatUid = event.data.uid;
-    }
+  if (!event.data) return;
+
+  if (event.data.type === 'SET_ACTIVE_CHAT') {
+    activeChatUid = event.data.uid || null;
+  }
+
+  if (event.data.type === 'GET_ACTIVE_CHAT' && event.ports && event.ports[0]) {
+    event.ports[0].postMessage({ activeChatUid });
+  }
 });
 
+async function isActiveChatWithSender(senderUid) {
+  if (!senderUid || activeChatUid !== senderUid) {
+    return false;
+  }
+
+  const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  return windowClients.some((client) => client.visibilityState === 'visible');
+}
+
 self.addEventListener('push', function(event) {
-    if (!event.data) return;
-    
-    const data = event.data.json();
-    const senderUid = data.senderUid; 
+  if (!event.data) return;
 
-    const promiseChain = clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true
-    }).then((windowClients) => {
-        let isChatCurrentlyFocused = false;
+  const data = event.data.json();
+  const senderUid = data.senderUid;
 
-        for (let i = 0; i < windowClients.length; i++) {
-            const client = windowClients[i];
-            
-            // Если вкладка активна И пользователь сейчас в чате с тем, кто прислал сообщение
-            if (client.visibilityState === 'visible' && activeChatUid === senderUid) {
-                isChatCurrentlyFocused = true;
-                break;
+  event.waitUntil(
+    isActiveChatWithSender(senderUid).then((suppress) => {
+      if (suppress) {
+        return self.registration.getNotifications().then((notifications) => {
+          notifications.forEach((notification) => {
+            if (notification.tag === senderUid) {
+              notification.close();
             }
-        }
-
-        // Если пользователь уже смотрит в этот чат — глушим уведомление
-        if (isChatCurrentlyFocused) {
-            return null;
-        }
-
-        // Иначе показываем пуш
-        return self.registration.showNotification(data.title || 'Новое сообщение', {
-            body: data.body || 'Вам прислали сообщение',
-            icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png', // Добавлена иконка
-            tag: senderUid, 
-            data: { senderUid: senderUid }
+          });
         });
-    });
+      }
 
-    event.waitUntil(promiseChain);
+      return self.registration.showNotification(data.title || 'Новое сообщение', {
+        body: data.body || 'Вам прислали сообщение',
+        icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png',
+        tag: senderUid,
+        renotify: true,
+        data: { senderUid }
+      });
+    })
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {
-    event.notification.close();
-    
-    // Используем scope регистрации как базовый URL
-    const baseUrl = self.registration.scope;
-    const senderUid = event.notification.data?.senderUid;
+  event.notification.close();
 
-    event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-            // 1. Ищем уже открытую вкладку с приложением
-            for (let i = 0; i < windowClients.length; i++) {
-                const client = windowClients[i];
-                if (client.url.includes(baseUrl)) {
-                    client.focus(); // Разворачиваем браузер
-                    
-                    // Отправляем команду открыть чат
-                    if (senderUid) {
-                        client.postMessage({ type: 'OPEN_CHAT', senderUid: senderUid });
-                    }
-                    return;
-                }
-            }
-            
-            // 2. Если ни одной вкладки нет, открываем новую с ПРАВИЛЬНЫМ параметром URL
-            const finalUrl = senderUid ? `${baseUrl}?chatWith=${senderUid}` : baseUrl;
-            return clients.openWindow(finalUrl);
-        })
-    );
+  const baseUrl = new URL('./', self.registration.scope).href;
+  const senderUid = event.notification.data?.senderUid;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (let i = 0; i < windowClients.length; i++) {
+        const client = windowClients[i];
+        if (client.url.startsWith(baseUrl) || client.url.includes(self.location.origin)) {
+          client.focus();
+          if (senderUid) {
+            client.postMessage({ type: 'OPEN_CHAT', senderUid });
+          }
+          return;
+        }
+      }
+
+      return clients.openWindow(baseUrl).then((client) => {
+        if (client && senderUid) {
+          client.postMessage({ type: 'OPEN_CHAT', senderUid });
+        }
+      });
+    })
+  );
 });

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Libero Messenger</title>
-    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./style.css?v=102">
     <link rel="manifest" href="./manifest.json">
     <meta name="theme-color" content="#6366f1">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1041/1041916.png">
@@ -107,7 +107,7 @@
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <button class="menu-toggle" id="menuToggleBtn"><svg style="width:24px;height:24px;fill:var(--text-main)"><use href="#icon-menu"></use></svg></button>
-            <h1 style="font-size: 20px; font-weight: 700; letter-spacing: 1px;" id="myProfileName">Libero</h1>
+            <h1 style="font-size: 20px; font-weight: 700; letter-spacing: 1px; cursor: pointer;" id="myProfileName" title="Мой профиль">Libero</h1>
             <div style="display: flex; gap: 10px;">
                <button id="themeToggleBtn" title="Сменить тему" style="display:flex; justify-content:center; align-items:center; width:24px; height:24px;">
                     <svg style="width:20px;height:20px;stroke:var(--text-main); fill:none;" id="themeIcon"><use href="#icon-sun"></use></svg>
@@ -163,8 +163,10 @@
             </div>
         </div>
 
+        <div class="attach-preview" id="attachPreview" style="display:none;"></div>
         <div class="chat-input-area" id="chatInputArea" style="display:none;">
-            <button class="action-btn attach-btn"><svg><use href="#icon-attach"></use></svg></button>
+            <input type="file" id="attachInput" accept="image/*" multiple hidden>
+            <button type="button" class="action-btn attach-btn" id="attachBtn" title="Прикрепить фото"><svg><use href="#icon-attach"></use></svg></button>
             <div class="input-wrapper">
                 <textarea id="messageInput" placeholder="Написать сообщение..." rows="1"></textarea>
             </div>
@@ -181,15 +183,11 @@
         </div>
         <div class="info-section">
             <h3>Описание</h3>
-            <p style="font-size: 14px; line-height: 1.5;">В сети. Занят разработкой. Писать только по делу.</p>
+            <p style="font-size: 14px; line-height: 1.5;" id="infoBio">—</p>
         </div>
         <div class="info-section">
-            <h3>Вложения</h3>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 10px;">
-                <div style="aspect-ratio: 1; background: var(--glass-border); border-radius: 8px;"></div>
-                <div style="aspect-ratio: 1; background: var(--glass-border); border-radius: 8px;"></div>
-                <div style="aspect-ratio: 1; background: var(--glass-border); border-radius: 8px;"></div>
-            </div>
+            <button type="button" class="profile-link-btn" id="infoOpenProfileBtn">Открыть профиль</button>
+            <button type="button" class="profile-danger-btn" id="infoRemoveFriendBtn" style="display:none;">Удалить из друзей</button>
         </div>
     </div>
 
@@ -224,6 +222,32 @@
     </div>
 </div>
 
+<div class="profile-modal-overlay" id="profileModal">
+    <div class="profile-modal-card">
+        <button type="button" class="profile-close" id="profileCloseBtn" aria-label="Закрыть">×</button>
+        <div class="profile-avatar-wrap" id="profileAvatarWrap">
+            <img id="profileAvatarImg" class="avatar profile-avatar-img" alt="" style="display:none;">
+            <div class="avatar profile-avatar-letter" id="profileAvatarLetter"></div>
+            <label id="profileAvatarEdit" class="profile-avatar-edit" style="display:none;" title="Сменить фото">
+                <input type="file" id="profileAvatarInput" accept="image/*" hidden>
+                📷
+            </label>
+        </div>
+        <h2 id="profileUsername"></h2>
+        <div class="profile-status" id="profileStatusText">—</div>
+        <div class="profile-field" id="profileEmailBlock">
+            <label for="profileEmail">Email</label>
+            <input type="email" id="profileEmail" class="input-field" autocomplete="email">
+        </div>
+        <div class="profile-field">
+            <label for="profileBio">О себе</label>
+            <textarea id="profileBio" class="input-field profile-bio" rows="3" maxlength="280" placeholder="Расскажите о себе..."></textarea>
+        </div>
+        <button type="button" class="auth-btn" id="profileSaveBtn" style="display:none;">Сохранить</button>
+        <button type="button" class="profile-danger-btn" id="profileRemoveFriendBtn" style="display:none;">Удалить из друзей</button>
+    </div>
+</div>
+
 <div class="custom-confirm-overlay" id="customConfirmModal">
     <div class="custom-confirm-card">
         <h3 class="custom-confirm-title" id="customConfirmTitle">Подтверждение</h3>
@@ -235,7 +259,7 @@
     </div>
 </div>
 
-<script type="module" src="./scripts.js"></script>
+<script type="module" src="./scripts.js?v=102"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
