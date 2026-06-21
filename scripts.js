@@ -784,7 +784,7 @@ function startListeningRequestsAndFriends() {
                 document.getElementById(`reject-${reqId}`).onclick = () => rejectFriendRequest(reqId);
             });
         }
-    });
+    }, (err) => console.warn('Friend requests listener error:', err));
 
     // 2. Слушаем список друзей (заявки accepted, где мы отправитель или получатель)
     const friendsSentQuery = query(
@@ -829,7 +829,7 @@ function startListeningRequestsAndFriends() {
             }
         });
         syncFriendsList();
-    });
+    }, (err) => console.warn('Friends sent listener error:', err));
 
     const unsubFriendsReceived = onSnapshot(friendsReceivedQuery, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
@@ -846,7 +846,7 @@ function startListeningRequestsAndFriends() {
             }
         });
         syncFriendsList();
-    });
+    }, (err) => console.warn('Friends received listener error:', err));
 
     unsubscribeFriends = () => {
         unsubFriendsSent();
@@ -2053,14 +2053,15 @@ async function saveCallEvent(status, duration) {
             receiverUid: currentChatFriend.uid,
             type: 'call',
             callType: currentCallType || 'voice',
-            callStatus: status, // 'missed', 'outgoing', 'answered', 'rejected'
+            callStatus: status,
             callDuration: durationStr,
             text: '',
             createdAt: Date.now(),
             isRead: true
         });
     } catch (e) {
-        console.error('Failed to save call event:', e);
+        // Silently fail — permission error means Firestore rules haven't been deployed yet
+        console.warn('Call event save failed (deploy Firestore rules?):', e.message);
     }
 }
 
@@ -2181,14 +2182,14 @@ async function initiateCall(type) {
             }
         } else if (data.status === 'rejected') {
             showNotification('Звонок отклонён.', 'info');
-            saveCallEvent('rejected', 0);
+            try { await saveCallEvent('rejected', 0); } catch(e) { console.warn('Save call event error:', e); }
             cleanupCall();
         } else if (data.status === 'ended') {
             const dur = callStartTime ? (Date.now() - callStartTime) : 0;
-            saveCallEvent(dur > 0 ? 'answered' : 'missed', dur);
+            try { await saveCallEvent(dur > 0 ? 'answered' : 'missed', dur); } catch(e) { console.warn('Save call event error:', e); }
             cleanupCall();
         }
-    });
+    }, (err) => console.warn('Call listener error:', err));
 
     // Send caller ICE candidates
     peerConnection.onicecandidate = async (event) => {
@@ -2347,7 +2348,7 @@ function listenForRemoteCandidates(collectionName) {
                 } catch (e) { console.warn('Add ICE candidate error:', e); }
             }
         });
-    });
+    }, (err) => console.warn('ICE candidates listener error:', err));
     // Store for cleanup
     if (collectionName === 'callerCandidates') {
         callerCandidatesUnsub = unsub;
@@ -2451,7 +2452,7 @@ function startIncomingCallListener() {
                 callModal.classList.add('active');
             }
         });
-    });
+    }, (err) => console.warn('Incoming call listener error:', err));
 }
 
 // Функция очистки уведомлений КОНКРЕТНОГО пользователя — см. clearNotificationsBySender выше
@@ -2520,7 +2521,7 @@ async function startGlobalNotificationListener() {
                 }
             }
         });
-    });
+    }, (err) => console.warn('Unread messages listener error:', err));
 }
 
 window.forceOpenChat = async (uid) => {
