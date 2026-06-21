@@ -1947,6 +1947,8 @@ let currentCallId = null;
 let currentCallType = ''; // 'voice' | 'video'
 let callDocRef = null;
 let callUnsubscribe = null;
+let callerCandidatesUnsub = null;
+let receiverCandidatesUnsub = null;
 let callTimerInterval = null;
 let callStartTime = null;
 let isInCall = false;
@@ -2017,15 +2019,28 @@ pipMiniCall.addEventListener('click', () => {
     }
 });
 
-// PiP swap: tap on local video (PiP) to swap local/remote
+// PiP swap: tap on local video (PiP) to swap local/remote video positions (not audio)
 document.querySelector('.vc-pip')?.addEventListener('click', (e) => {
     e.stopPropagation();
+    const pipContainer = document.querySelector('.vc-pip');
+    const videoCallFS = document.getElementById('videoCallFS');
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
-    if (!localVideo || !remoteVideo) return;
-    const tmpSrc = localVideo.srcObject;
-    localVideo.srcObject = remoteVideo.srcObject;
-    remoteVideo.srcObject = tmpSrc;
+    if (!localVideo || !remoteVideo || !pipContainer) return;
+
+    if (!isPipSwapped) {
+        // Move remote video into PiP, local video to main view
+        remoteVideo.style.width = '100%'; remoteVideo.style.height = '100%'; remoteVideo.style.borderRadius = '12px';
+        localVideo.style.width = '100%'; localVideo.style.height = '100%'; localVideo.style.borderRadius = '';
+        pipContainer.appendChild(remoteVideo);
+        videoCallFS.insertBefore(localVideo, videoCallFS.firstChild);
+    } else {
+        // Restore: local in PiP, remote in main
+        localVideo.style.width = '100%'; localVideo.style.height = '100%'; localVideo.style.borderRadius = '12px';
+        remoteVideo.style.width = '100%'; remoteVideo.style.height = '100%'; remoteVideo.style.borderRadius = '';
+        pipContainer.appendChild(localVideo);
+        videoCallFS.insertBefore(remoteVideo, videoCallFS.firstChild);
+    }
     isPipSwapped = !isPipSwapped;
 });
 btnToggleMic.addEventListener('click', toggleMic);
@@ -2246,9 +2261,7 @@ async function initiateCall(type) {
         type,
         status: 'ringing',
         offer: JSON.stringify(peerConnection.localDescription),
-        createdAt: Date.now(),
-        callerCandidates: [],
-        receiverCandidates: []
+        createdAt: Date.now()
     });
 
     // Show outgoing call UI
@@ -2263,35 +2276,15 @@ async function initiateCall(type) {
     callModal.classList.add('active');
     startRingSound();
 
-    // Listen for answer and remote ICE candidates
-    let processedReceiverCandidates = 0;
+    // Listen for answer
     callUnsubscribe = onSnapshot(callDocRef, async (snap) => {
         const data = snap.data();
         if (!data) return;
-
-        // Process new receiver ICE candidates from the call document
-        if (data.receiverCandidates && peerConnection && peerConnection.remoteDescription) {
-            while (processedReceiverCandidates < data.receiverCandidates.length) {
-                try {
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(data.receiverCandidates[processedReceiverCandidates])));
-                } catch (e) { /* ignore duplicate */ }
-                processedReceiverCandidates++;
-            }
-        }
 
         if (data.status === 'accepted' && data.answer && peerConnection && peerConnection.signalingState === 'have-local-offer') {
             try {
                 const answer = JSON.parse(data.answer);
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                // Process any candidates that arrived before the answer
-                if (data.receiverCandidates) {
-                    while (processedReceiverCandidates < data.receiverCandidates.length) {
-                        try {
-                            await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(data.receiverCandidates[processedReceiverCandidates])));
-                        } catch (e) { /* ignore */ }
-                        processedReceiverCandidates++;
-                    }
-                }
             } catch (e) {
                 console.error('Set remote desc error:', e);
             }
@@ -2307,20 +2300,17 @@ async function initiateCall(type) {
         }
     }, (err) => console.warn('Call listener error:', err));
 
-    // Send caller ICE candidates (stored as JSON strings in call document)
+    // Send caller ICE candidates
     peerConnection.onicecandidate = async (event) => {
-        if (event.candidate && callDocRef) {
+        if (event.candidate && currentCallId) {
             try {
-                const snap = await getDoc(callDocRef);
-                const current = snap.data()?.callerCandidates || [];
-                const candidateStr = JSON.stringify(event.candidate.toJSON());
-                if (!current.includes(candidateStr)) {
-                    current.push(candidateStr);
-                    await updateDoc(callDocRef, { callerCandidates: current });
-                }
+                await addDoc(collection(db, 'calls', currentCallId, 'callerCandidates'), event.candidate.toJSON());
             } catch (e) { console.warn('ICE candidate send error:', e); }
         }
     };
+
+    // Listen for receiver ICE candidates
+    listenForRemoteCandidates('receiverCandidates');
 
     // Send push notification about the call
     await sendPushToUser(currentChatFriend.uid, `${type === 'video' ? 'Видеозвонок' : 'Аудиозвонок'} от ${currentUser.username}`, currentUser.uid);
@@ -2445,39 +2435,48 @@ async function acceptCall() {
         callModal.classList.add('active');
     }
 
-    // Send receiver ICE candidates (stored as JSON strings in call document)
+    // Send receiver ICE candidates
     peerConnection.onicecandidate = async (event) => {
-        if (event.candidate && callDocRef) {
+        if (event.candidate && currentCallId) {
             try {
-                const snap = await getDoc(callDocRef);
-                const current = snap.data()?.receiverCandidates || [];
-                const candidateStr = JSON.stringify(event.candidate.toJSON());
-                if (!current.includes(candidateStr)) {
-                    current.push(candidateStr);
-                    await updateDoc(callDocRef, { receiverCandidates: current });
-                }
+                await addDoc(collection(db, 'calls', currentCallId, 'receiverCandidates'), event.candidate.toJSON());
             } catch (e) { console.warn('ICE candidate send error:', e); }
         }
     };
 
-    // Listen for caller ICE candidates via call document
-    let processedCallerCandidates = 0;
-    callUnsubscribe = onSnapshot(callDocRef, async (snap) => {
+    // Listen for caller ICE candidates
+    listenForRemoteCandidates('callerCandidates');
+
+    // Listen for call status changes (end call)
+    callUnsubscribe = onSnapshot(callDocRef, (snap) => {
         const data = snap.data();
         if (!data) return;
-        // Process new caller ICE candidates
-        if (data.callerCandidates && peerConnection && peerConnection.remoteDescription) {
-            while (processedCallerCandidates < data.callerCandidates.length) {
-                try {
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(data.callerCandidates[processedCallerCandidates])));
-                } catch (e) { /* ignore */ }
-                processedCallerCandidates++;
-            }
-        }
         if (data.status === 'ended') {
             cleanupCall();
         }
     }, (err) => console.warn('Call listener error:', err));
+}
+
+function listenForRemoteCandidates(collectionName) {
+    if (!currentCallId) return;
+    const unsub = onSnapshot(
+        collection(db, 'calls', currentCallId, collectionName),
+        (snapshot) => {
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === 'added' && peerConnection && peerConnection.remoteDescription) {
+                    try {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+                    } catch (e) { /* ignore */ }
+                }
+            });
+        },
+        (err) => console.warn('Candidate listener error:', err)
+    );
+    if (collectionName === 'callerCandidates') {
+        callerCandidatesUnsub = unsub;
+    } else {
+        receiverCandidatesUnsub = unsub;
+    }
 }
 
 async function rejectCall() {
@@ -2535,6 +2534,8 @@ function cleanupCall() {
 
 function cleanupCallResources() {
     if (callUnsubscribe) { callUnsubscribe(); callUnsubscribe = null; }
+    if (callerCandidatesUnsub) { callerCandidatesUnsub(); callerCandidatesUnsub = null; }
+    if (receiverCandidatesUnsub) { receiverCandidatesUnsub(); receiverCandidatesUnsub = null; }
     if (peerConnection) {
         peerConnection.close();
         peerConnection = null;
