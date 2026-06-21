@@ -21,8 +21,7 @@ import {
     updateDoc,
     deleteField,
     limit,
-    writeBatch,
-    arrayUnion
+    writeBatch
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 import { supabase } from './supabase.js';
@@ -2247,7 +2246,9 @@ async function initiateCall(type) {
         type,
         status: 'ringing',
         offer: JSON.stringify(peerConnection.localDescription),
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        callerCandidates: [],
+        receiverCandidates: []
     });
 
     // Show outgoing call UI
@@ -2310,7 +2311,13 @@ async function initiateCall(type) {
     peerConnection.onicecandidate = async (event) => {
         if (event.candidate && callDocRef) {
             try {
-                await updateDoc(callDocRef, { callerCandidates: arrayUnion(JSON.stringify(event.candidate.toJSON())) });
+                const snap = await getDoc(callDocRef);
+                const current = snap.data()?.callerCandidates || [];
+                const candidateStr = JSON.stringify(event.candidate.toJSON());
+                if (!current.includes(candidateStr)) {
+                    current.push(candidateStr);
+                    await updateDoc(callDocRef, { callerCandidates: current });
+                }
             } catch (e) { console.warn('ICE candidate send error:', e); }
         }
     };
@@ -2442,7 +2449,13 @@ async function acceptCall() {
     peerConnection.onicecandidate = async (event) => {
         if (event.candidate && callDocRef) {
             try {
-                await updateDoc(callDocRef, { receiverCandidates: arrayUnion(JSON.stringify(event.candidate.toJSON())) });
+                const snap = await getDoc(callDocRef);
+                const current = snap.data()?.receiverCandidates || [];
+                const candidateStr = JSON.stringify(event.candidate.toJSON());
+                if (!current.includes(candidateStr)) {
+                    current.push(candidateStr);
+                    await updateDoc(callDocRef, { receiverCandidates: current });
+                }
             } catch (e) { console.warn('ICE candidate send error:', e); }
         }
     };
@@ -2569,7 +2582,6 @@ function startIncomingCallListener() {
                 document.getElementById('outgoingControls').style.display = 'none';
                 document.getElementById('incomingControls').style.display = 'flex';
                 callModal.classList.add('active');
-                startRingSound();
             }
         });
     }, (err) => console.warn('Incoming call listener error:', err));
