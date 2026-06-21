@@ -21,7 +21,8 @@ import {
     updateDoc,
     deleteField,
     limit,
-    writeBatch
+    writeBatch,
+    arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 import { supabase } from './supabase.js';
@@ -1949,8 +1950,6 @@ let currentCallId = null;
 let currentCallType = ''; // 'voice' | 'video'
 let callDocRef = null;
 let callUnsubscribe = null;
-let callerCandidatesUnsub = null;
-let receiverCandidatesUnsub = null;
 let callTimerInterval = null;
 let callStartTime = null;
 let isInCall = false;
@@ -2201,15 +2200,35 @@ async function initiateCall(type) {
     document.getElementById('incomingControls').style.display = 'none';
     callModal.classList.add('active');
 
-    // Listen for answer
+    // Listen for answer and remote ICE candidates
+    let processedReceiverCandidates = 0;
     callUnsubscribe = onSnapshot(callDocRef, async (snap) => {
         const data = snap.data();
         if (!data) return;
+
+        // Process new receiver ICE candidates from the call document
+        if (data.receiverCandidates && peerConnection && peerConnection.remoteDescription) {
+            while (processedReceiverCandidates < data.receiverCandidates.length) {
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.receiverCandidates[processedReceiverCandidates]));
+                } catch (e) { /* ignore duplicate */ }
+                processedReceiverCandidates++;
+            }
+        }
 
         if (data.status === 'accepted' && data.answer && peerConnection && peerConnection.signalingState === 'have-local-offer') {
             try {
                 const answer = JSON.parse(data.answer);
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                // Process any candidates that arrived before the answer
+                if (data.receiverCandidates) {
+                    while (processedReceiverCandidates < data.receiverCandidates.length) {
+                        try {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.receiverCandidates[processedReceiverCandidates]));
+                        } catch (e) { /* ignore */ }
+                        processedReceiverCandidates++;
+                    }
+                }
             } catch (e) {
                 console.error('Set remote desc error:', e);
             }
@@ -2224,17 +2243,14 @@ async function initiateCall(type) {
         }
     }, (err) => console.warn('Call listener error:', err));
 
-    // Send caller ICE candidates
+    // Send caller ICE candidates (stored in call document)
     peerConnection.onicecandidate = async (event) => {
-        if (event.candidate && currentCallId) {
+        if (event.candidate && callDocRef) {
             try {
-                await addDoc(collection(db, 'calls', currentCallId, 'callerCandidates'), event.candidate.toJSON());
+                await updateDoc(callDocRef, { callerCandidates: arrayUnion(event.candidate.toJSON()) });
             } catch (e) { console.warn('ICE candidate send error:', e); }
         }
     };
-
-    // Listen for receiver ICE candidates
-    listenForRemoteCandidates('receiverCandidates');
 
     // Send push notification about the call
     await sendPushToUser(currentChatFriend.uid, `${type === 'video' ? 'Видеозвонок' : 'Аудиозвонок'} от ${currentUser.username}`, currentUser.uid);
@@ -2357,77 +2373,33 @@ async function acceptCall() {
         callModal.classList.add('active');
     }
 
-    // Send receiver ICE candidates
+    // Send receiver ICE candidates (stored in call document)
     peerConnection.onicecandidate = async (event) => {
-        if (event.candidate && currentCallId) {
+        if (event.candidate && callDocRef) {
             try {
-                await addDoc(collection(db, 'calls', currentCallId, 'receiverCandidates'), event.candidate.toJSON());
+                await updateDoc(callDocRef, { receiverCandidates: arrayUnion(event.candidate.toJSON()) });
             } catch (e) { console.warn('ICE candidate send error:', e); }
         }
     };
 
-    // Listen for caller ICE candidates
-    listenForRemoteCandidates('callerCandidates');
-}
-
-let candidatePollInterval = null;
-const processedCandidates = new Set();
-
-function listenForRemoteCandidates(collectionName) {
-    if (!currentCallId) return;
-    stopCandidatePolling();
-
-    // Try real-time listener first
-    const unsub = onSnapshot(
-        collection(db, 'calls', currentCallId, collectionName),
-        (snapshot) => {
-            snapshot.docChanges().forEach((change) => {
-                if (change.type === 'added' && peerConnection && peerConnection.remoteDescription) {
-                    try {
-                        peerConnection.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-                    } catch (e) { /* ignore */ }
-                }
-            });
-        },
-        (err) => {
-            // Permission error — fall back to fast polling
-            console.warn('Candidate listener failed, switching to polling:', err.message);
-            startCandidatePolling(collectionName);
+    // Listen for caller ICE candidates via call document
+    let processedCallerCandidates = 0;
+    callUnsubscribe = onSnapshot(callDocRef, async (snap) => {
+        const data = snap.data();
+        if (!data) return;
+        // Process new caller ICE candidates
+        if (data.callerCandidates && peerConnection && peerConnection.remoteDescription) {
+            while (processedCallerCandidates < data.callerCandidates.length) {
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.callerCandidates[processedCallerCandidates]));
+                } catch (e) { /* ignore */ }
+                processedCallerCandidates++;
+            }
         }
-    );
-
-    if (collectionName === 'callerCandidates') {
-        callerCandidatesUnsub = unsub;
-    } else {
-        receiverCandidatesUnsub = unsub;
-    }
-}
-
-function startCandidatePolling(collectionName) {
-    stopCandidatePolling();
-    processedCandidates.clear();
-
-    candidatePollInterval = setInterval(async () => {
-        if (!peerConnection || !currentCallId) return;
-        // Wait until remoteDescription is set before adding candidates
-        if (!peerConnection.remoteDescription) return;
-        try {
-            const snap = await getDocs(collection(db, 'calls', currentCallId, collectionName));
-            snap.forEach((docSnap) => {
-                if (!processedCandidates.has(docSnap.id)) {
-                    processedCandidates.add(docSnap.id);
-                    try {
-                        peerConnection.addIceCandidate(new RTCIceCandidate(docSnap.data()));
-                    } catch (e) { /* ignore */ }
-                }
-            });
-        } catch (e) { /* retry next tick */ }
-    }, 200);
-}
-
-function stopCandidatePolling() {
-    if (candidatePollInterval) { clearInterval(candidatePollInterval); candidatePollInterval = null; }
-    processedCandidates.clear();
+        if (data.status === 'ended') {
+            cleanupCall();
+        }
+    }, (err) => console.warn('Call listener error:', err));
 }
 
 async function rejectCall() {
@@ -2474,9 +2446,6 @@ function cleanupCall() {
 
 function cleanupCallResources() {
     if (callUnsubscribe) { callUnsubscribe(); callUnsubscribe = null; }
-    if (callerCandidatesUnsub) { callerCandidatesUnsub(); callerCandidatesUnsub = null; }
-    if (receiverCandidatesUnsub) { receiverCandidatesUnsub(); receiverCandidatesUnsub = null; }
-    stopCandidatePolling();
     if (peerConnection) {
         peerConnection.close();
         peerConnection = null;

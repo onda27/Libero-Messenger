@@ -92,6 +92,8 @@ service cloud.firestore {
     }
 
     // WebRTC Call signaling
+    // ICE candidates are stored directly in the call document
+    // as arrays: callerCandidates and receiverCandidates
     match /calls/{callId} {
       allow read: if isSignedIn() && (
         resource.data.callerUid == request.auth.uid ||
@@ -108,22 +110,6 @@ service cloud.firestore {
         resource.data.receiverUid == request.auth.uid
       );
       allow delete: if false;
-
-      // ICE candidates subcollections
-      match /callerCandidates/{candidateId} {
-        allow read, create: if isSignedIn() && (
-          parent().data.callerUid == request.auth.uid ||
-          parent().data.receiverUid == request.auth.uid
-        );
-        allow delete: if false;
-      }
-      match /receiverCandidates/{candidateId} {
-        allow read, create: if isSignedIn() && (
-          parent().data.callerUid == request.auth.uid ||
-          parent().data.receiverUid == request.auth.uid
-        );
-        allow delete: if false;
-      }
     }
   }
 }
