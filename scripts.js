@@ -20,7 +20,8 @@ import {
     deleteDoc,
     updateDoc,
     deleteField,
-    limit
+    limit,
+    writeBatch
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 import { supabase } from './supabase.js';
@@ -818,6 +819,11 @@ function startListeningRequestsAndFriends() {
             const data = change.doc.data();
             if (change.type === 'removed') {
                 friendsMap.delete(data.receiverUid);
+                // If chat is open with removed friend, close it
+                if (currentChatFriend && currentChatFriend.uid === data.receiverUid) {
+                    closeChat();
+                    document.getElementById('infoPanel')?.classList.remove('open');
+                }
             } else {
                 applyFriendRequest(data);
             }
@@ -830,6 +836,11 @@ function startListeningRequestsAndFriends() {
             const data = change.doc.data();
             if (change.type === 'removed') {
                 friendsMap.delete(data.senderUid);
+                // If chat is open with removed friend, close it
+                if (currentChatFriend && currentChatFriend.uid === data.senderUid) {
+                    closeChat();
+                    document.getElementById('infoPanel')?.classList.remove('open');
+                }
             } else {
                 applyFriendRequest(data);
             }
@@ -1491,12 +1502,43 @@ async function removeFriend(friendUid) {
         showNotification('Не удалось найти связь с пользователем.', 'error');
         return;
     }
-    await deleteDoc(doc(db, 'friend_requests', reqId));
+
+    // Close chat locally if open with this friend
     if (currentChatFriend && currentChatFriend.uid === friendUid) {
         closeChat();
         document.getElementById('infoPanel')?.classList.remove('open');
     }
     closeProfileModal();
+
+    // Delete all messages between the two users
+    try {
+        const msgsSent = await getDocs(query(
+            collection(db, 'messages'),
+            where('senderUid', '==', currentUser.uid),
+            where('receiverUid', '==', friendUid)
+        ));
+        const msgsReceived = await getDocs(query(
+            collection(db, 'messages'),
+            where('senderUid', '==', friendUid),
+            where('receiverUid', '==', currentUser.uid)
+        ));
+
+        const allDocs = [];
+        msgsSent.forEach(d => allDocs.push(d.ref));
+        msgsReceived.forEach(d => allDocs.push(d.ref));
+
+        // Batch delete in chunks of 500 (Firestore limit)
+        for (let i = 0; i < allDocs.length; i += 500) {
+            const batch = writeBatch(db);
+            allDocs.slice(i, i + 500).forEach(ref => batch.delete(ref));
+            await batch.commit();
+        }
+    } catch (e) {
+        console.error('Error deleting messages:', e);
+    }
+
+    // Delete the friendship document
+    await deleteDoc(doc(db, 'friend_requests', reqId));
     showNotification('Пользователь удалён из друзей.', 'success');
 }
 

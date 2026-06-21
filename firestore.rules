@@ -30,6 +30,13 @@ service cloud.firestore {
         && (!('encKeyB64' in request.resource.data) || request.resource.data.encKeyB64 is string);
     }
 
+    function validCallMessage() {
+      return request.resource.data.type == 'call'
+        && request.resource.data.callType is string
+        && request.resource.data.callStatus is string
+        && request.resource.data.isRead == true;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create: if isOwner(userId)
@@ -75,10 +82,13 @@ service cloud.firestore {
         && request.resource.data.receiverUid is string
         && request.resource.data.receiverUid != request.auth.uid
         && request.resource.data.createdAt is number
-        && request.resource.data.isRead == false
-        && (validTextMessage() || validImageMessage());
+        && (request.resource.data.isRead == false || validCallMessage())
+        && (validTextMessage() || validImageMessage() || validCallMessage());
       allow update: if isSignedIn() && resource.data.receiverUid == request.auth.uid;
-      allow delete: if false;
+      allow delete: if isSignedIn() && (
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.receiverUid == request.auth.uid
+      );
     }
 
     // WebRTC Call signaling

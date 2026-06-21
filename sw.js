@@ -1,10 +1,10 @@
 // sw.js
-const CACHE_NAME = 'libero-v112';
+const CACHE_NAME = 'libero-v113';
 const ASSETS = [
   './',
   './index.html',
-  './style.css?v=103',
-  './scripts.js?v=103',
+  './style.css?v=104',
+  './scripts.js?v=104',
   './firebase.js'
 ];
 
